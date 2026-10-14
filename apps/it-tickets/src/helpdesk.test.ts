@@ -40,20 +40,26 @@ function fakeChat() {
 describe('helpdesk', () => {
   let store: MemoryTicketStore;
   let calls: Call[];
+  let warnings: unknown[][];
   let helpdesk: ReturnType<typeof createHelpdesk>;
   /** Opens a Ticket for the Agent the Requester chose. */
   let openedFor: (agentId: string) => Promise<Ticket>;
+  /** A helpdesk on the same store and warnings that talks to Slack through `chat`. */
+  const withChat = (chat: Chat) =>
+    createHelpdesk({
+      store,
+      chat,
+      legacyAgentId: AGENT,
+      now: () => new Date('2026-10-14T12:00:00Z'),
+      logger: { warn: (...msg) => warnings.push(msg) },
+    });
 
   beforeEach(() => {
     store = new MemoryTicketStore();
     const fake = fakeChat();
     calls = fake.calls;
-    helpdesk = createHelpdesk({
-      store,
-      chat: fake.chat,
-      legacyAgentId: AGENT,
-      now: () => new Date('2026-10-14T12:00:00Z'),
-    });
+    warnings = [];
+    helpdesk = withChat(fake.chat);
     openedFor = (agentId) => helpdesk.open({ ...draft, agentId });
   });
 
@@ -67,6 +73,7 @@ describe('helpdesk', () => {
       expect(ticket.card).toEqual({ channel: `D${AGENT}`, ts: '100.1' });
       expect(ticket.confirmation).toEqual({ channel: `D${REQUESTER}`, ts: '100.2' });
       expect(await store.get('IT-0001')).toEqual(ticket);
+      expect(ticket).not.toHaveProperty('announcement');
     });
 
     it('records the Agent the Requester chose', async () => {
@@ -104,16 +111,7 @@ describe('helpdesk', () => {
     });
 
     it('stores nothing if the Agent cannot be messaged', async () => {
-      const failing = createHelpdesk({
-        store,
-        legacyAgentId: AGENT,
-        now: () => new Date(),
-        chat: {
-          postMessage: async () => {
-            throw new Error('channel_not_found');
-          },
-        } as unknown as Chat,
-      });
+      const failing = withChat(failingChat('channel_not_found'));
       await expect(failing.open(draft)).rejects.toThrow('channel_not_found');
       expect(store.tickets.size).toBe(0);
     });
@@ -149,6 +147,51 @@ describe('helpdesk', () => {
       await helpdesk.announce(ticket);
 
       expect(calls[0]!.args.text).toContain(`handled by <@${OTHER_AGENT}>`);
+    });
+
+    it('records where the Announcement was posted on the Ticket', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+
+      await helpdesk.announce(ticket);
+
+      expect((await store.get(ticket.number))?.announcement).toEqual({
+        channel: 'D#general',
+        ts: '100.3',
+      });
+    });
+
+    it('records the Announcement even if the Agent already Took the Ticket', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      await helpdesk.take(ticket.number, AGENT);
+
+      await helpdesk.announce(ticket);
+
+      expect(await store.get(ticket.number)).toMatchObject({
+        status: 'In progress',
+        announcement: { channel: 'D#general' },
+      });
+    });
+
+    it('records no Announcement when the post fails', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      const failing = withChat(failingChat('not_in_channel'));
+
+      await expect(failing.announce(ticket)).rejects.toThrow('not_in_channel');
+      expect(await store.get(ticket.number)).not.toHaveProperty('announcement');
+    });
+
+    it('only warns if the Announcement cannot be recorded, leaving the Ticket open', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      store.recordAnnouncement = async () => {
+        throw new Error('ProvisionedThroughputExceeded');
+      };
+
+      await helpdesk.announce(ticket);
+
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0]![0])).toContain(ticket.number);
+      expect((await store.get(ticket.number))?.status).toBe('Open');
+      expect(await helpdesk.take(ticket.number, AGENT)).toBe('done');
     });
   });
 
@@ -205,9 +248,9 @@ describe('helpdesk', () => {
       const ticket = await helpdesk.open(draft);
       calls.length = 0;
 
-      expect(await helpdesk.resolve(ticket.number, AGENT, 'Restarted the VPN gateway')).toBe(
-        'done',
-      );
+      expect(
+        await helpdesk.resolve(ticket.number, AGENT, { note: 'Restarted the VPN gateway' }),
+      ).toBe('done');
 
       const stored = await store.get(ticket.number);
       expect(stored).toMatchObject({
@@ -241,9 +284,9 @@ describe('helpdesk', () => {
     it("lets only the Ticket's own Agent open the Resolve form", async () => {
       const ticket = await openedFor(OTHER_AGENT);
 
-      expect(await helpdesk.isAgentOf(ticket.number, OTHER_AGENT)).toBe(true);
-      expect(await helpdesk.isAgentOf(ticket.number, AGENT)).toBe(false);
-      expect(await helpdesk.isAgentOf('IT-9999', AGENT)).toBe(false);
+      expect(await helpdesk.ticketForAgent(ticket.number, OTHER_AGENT)).toEqual(ticket);
+      expect(await helpdesk.ticketForAgent(ticket.number, AGENT)).toBeUndefined();
+      expect(await helpdesk.ticketForAgent('IT-9999', AGENT)).toBeUndefined();
     });
 
     it('never moves a Resolved Ticket', async () => {
@@ -253,6 +296,94 @@ describe('helpdesk', () => {
       expect(await helpdesk.take(ticket.number, AGENT)).toBe('stale');
       expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('stale');
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
+    });
+  });
+
+  describe('resolve with an Announcement follow-up', () => {
+    /** Opens and announces a Ticket, so it has an Announcement at `D#general` / `100.3`. */
+    async function announced(): Promise<Ticket> {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      await helpdesk.announce(ticket);
+      calls.length = 0;
+      return ticket;
+    }
+    const generalPosts = () => calls.filter((c) => c.args.channel === 'D#general');
+
+    it("posts it in the Announcement's thread, naming the Agent and Ticket, with the Resolution note", async () => {
+      const ticket = await announced();
+
+      expect(
+        await helpdesk.resolve(ticket.number, AGENT, {
+          note: 'Restarted the VPN gateway',
+          postFollowUp: true,
+        }),
+      ).toBe('done');
+
+      const [followUp] = generalPosts();
+      expect(followUp).toMatchObject({ method: 'postMessage', args: { thread_ts: '100.3' } });
+      expect(followUp!.args).not.toHaveProperty('reply_broadcast');
+      expect(followUp!.args.text).toContain(`<@${AGENT}>`);
+      expect(followUp!.args.text).toContain(ticket.number);
+      expect(JSON.stringify(followUp!.args.blocks)).toContain('Restarted the VPN gateway');
+    });
+
+    it('still updates the Ticket card and the Requester as usual', async () => {
+      const ticket = await announced();
+
+      await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true });
+
+      expect(calls.map((c) => [c.method, c.args.channel])).toEqual([
+        ['update', ticket.card.channel],
+        ['postMessage', ticket.confirmation.channel],
+        ['postMessage', 'D#general'],
+      ]);
+    });
+
+    it('posts nothing in #general unless asked', async () => {
+      const ticket = await announced();
+
+      await helpdesk.resolve(ticket.number, AGENT, { note: 'Done' });
+
+      expect(generalPosts()).toEqual([]);
+    });
+
+    it('posts nothing in #general for a Ticket without an Announcement', async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      expect(await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+
+      expect(calls.map((c) => c.method)).toEqual(['update', 'postMessage']);
+    });
+
+    it('never posts it twice for a double Resolve', async () => {
+      const ticket = await announced();
+
+      await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true });
+      expect(await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('stale');
+
+      expect(generalPosts()).toHaveLength(1);
+    });
+
+    it('only warns if the follow-up fails, leaving the Ticket Resolved and everyone else updated', async () => {
+      const ticket = await announced();
+      const fake = fakeChat();
+      const postMessage = fake.chat.postMessage;
+      fake.chat.postMessage = (async (args: { channel: string }) => {
+        if (args.channel === 'D#general') throw new Error('is_archived');
+        return postMessage(args as never);
+      }) as Chat['postMessage'];
+      const flaky = withChat(fake.chat);
+
+      expect(await flaky.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+
+      expect((await store.get(ticket.number))?.status).toBe('Resolved');
+      expect(fake.calls.map((c) => c.args.channel)).toEqual([
+        ticket.card.channel,
+        ticket.confirmation.channel,
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0]![0])).toContain(ticket.number);
     });
   });
 
@@ -269,7 +400,7 @@ describe('helpdesk', () => {
     it('belongs to the legacy Agent', async () => {
       const number = await legacyTicket();
 
-      expect(await helpdesk.isAgentOf(number, AGENT)).toBe(true);
+      expect((await helpdesk.ticketForAgent(number, AGENT))?.agentId).toBe(AGENT);
       expect(await helpdesk.take(number, OTHER_AGENT)).toBe('not-agent');
       expect(await helpdesk.take(number, AGENT)).toBe('done');
       expect(calls[1]!.args.text).toContain(`<@${AGENT}> has taken`);
@@ -278,6 +409,15 @@ describe('helpdesk', () => {
     });
   });
 });
+
+/** A chat on which every post fails with `error`. */
+function failingChat(error: string): Chat {
+  return {
+    postMessage: async () => {
+      throw new Error(error);
+    },
+  } as unknown as Chat;
+}
 
 function buttonsOf(call: Call): string[] {
   const blocks = call.args.blocks as { type: string; elements?: { action_id: string }[] }[];

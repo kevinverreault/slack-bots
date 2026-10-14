@@ -5,6 +5,7 @@ import {
   messagePermalink,
   parseResolveSubmission,
   parseTicketSubmission,
+  resolveModal,
   ticketModal,
 } from './views.js';
 
@@ -155,7 +156,61 @@ describe('ticketModal', () => {
   });
 });
 
+describe('resolveModal', () => {
+  const blockIds = (announced: boolean) =>
+    resolveModal('IT-0003', { announced }).blocks.map((b) => b.block_id);
+  const noteHint = (announced: boolean) =>
+    JSON.stringify(
+      resolveModal('IT-0003', { announced }).blocks.find((b) => b.block_id === 'note'),
+    );
+
+  it('offers to post the resolution in #general, unticked, only for an announced Ticket', () => {
+    expect(blockIds(false)).toEqual(['note']);
+    expect(blockIds(true)).toEqual(['note', 'share']);
+    const share = resolveModal('IT-0003', { announced: true }).blocks[1]!;
+    expect(share).toMatchObject({ type: 'input', optional: true });
+    expect(JSON.stringify(share)).toContain('Also post the resolution in #general');
+    expect(share).not.toHaveProperty('element.initial_options');
+  });
+
+  it("warns in the note's hint that it will also show in #general if ticked", () => {
+    expect(noteHint(false)).not.toContain('#general');
+    expect(noteHint(true)).toContain('#general');
+  });
+});
+
 describe('parseResolveSubmission', () => {
+  const resolveSubmission = (share?: string[]) =>
+    ({
+      private_metadata: 'IT-0003',
+      state: {
+        values: {
+          note: { value: { type: 'plain_text_input', value: 'Fixed' } },
+          ...(share && {
+            share: {
+              value: { type: 'checkboxes', selected_options: share.map((value) => ({ value })) },
+            },
+          }),
+        },
+      },
+    }) as unknown as ViewOutput;
+
+  it('asks for an Announcement follow-up only when the box is ticked', () => {
+    expect(parseResolveSubmission(resolveSubmission(['general']))).toEqual({
+      ticketNumber: 'IT-0003',
+      note: 'Fixed',
+      postFollowUp: true,
+    });
+    expect(parseResolveSubmission(resolveSubmission([]))).toEqual({
+      ticketNumber: 'IT-0003',
+      note: 'Fixed',
+    });
+    expect(parseResolveSubmission(resolveSubmission())).toEqual({
+      ticketNumber: 'IT-0003',
+      note: 'Fixed',
+    });
+  });
+
   it('drops a blank Resolution note', () => {
     const view = {
       private_metadata: 'IT-0003',

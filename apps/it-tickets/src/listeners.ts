@@ -31,7 +31,7 @@ export function registerListeners(
   { store, agentIds, now = () => new Date() }: ListenerDeps,
 ) {
   const helpdesk = (chat: Chat) =>
-    createHelpdesk({ store, chat, legacyAgentId: agentIds[0]!, now });
+    createHelpdesk({ store, chat, legacyAgentId: agentIds[0]!, now, logger: app.logger });
 
   app.command(SLASH_COMMAND, async ({ ack, body, client, logger }) => {
     await ack();
@@ -93,18 +93,18 @@ export function registerListeners(
   app.action(RESOLVE_ACTION, async ({ ack, body, action, client }) => {
     await ack();
     if (action.type !== 'button' || !('trigger_id' in body)) return;
-    const ticketNumber = action.value ?? '';
-    if (!(await helpdesk(client.chat).isAgentOf(ticketNumber, body.user.id))) return;
+    const ticket = await helpdesk(client.chat).ticketForAgent(action.value ?? '', body.user.id);
+    if (!ticket) return;
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: resolveModal(ticketNumber),
+      view: resolveModal(ticket.number, { announced: !!ticket.announcement }),
     });
   });
 
   app.view(RESOLVE_TICKET_VIEW, async ({ ack, body, view, client, logger }) => {
     await ack();
-    const { ticketNumber, note } = parseResolveSubmission(view);
-    const outcome = await helpdesk(client.chat).resolve(ticketNumber, body.user.id, note);
+    const { ticketNumber, ...resolution } = parseResolveSubmission(view);
+    const outcome = await helpdesk(client.chat).resolve(ticketNumber, body.user.id, resolution);
     logOutcome(logger, 'resolve', ticketNumber, body.user.id, outcome);
   });
 }

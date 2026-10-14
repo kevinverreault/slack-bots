@@ -35,6 +35,8 @@ export interface Ticket extends TicketDraft {
   resolutionNote?: string;
   confirmation: MessageRef;
   card: MessageRef;
+  /** Where the Ticket was posted in #general, once its Announcement is recorded. */
+  announcement?: MessageRef;
 }
 
 export function formatTicketNumber(sequence: number): string {

@@ -98,22 +98,7 @@ export function ticketModal(agents: AgentChoice[], prefill: TicketModalPrefill =
           })),
         },
       },
-      {
-        type: 'input',
-        block_id: 'share',
-        optional: true,
-        label: { type: 'plain_text', text: 'Visibility' },
-        element: {
-          type: 'checkboxes',
-          action_id: 'value',
-          options: [
-            {
-              text: { type: 'plain_text', text: 'Also post this ticket in #general' },
-              value: POST_TO_GENERAL,
-            },
-          ],
-        },
-      },
+      generalCheckbox('Also post this ticket in #general'),
     ],
   };
 }
@@ -132,9 +117,7 @@ export function parseTicketSubmission(
   const category = values.category?.value?.selected_option?.value as Category | undefined;
   const urgency = values.urgency?.value?.selected_option?.value as Urgency | undefined;
   const agentId = values.agent?.value?.selected_option?.value;
-  const postToGeneral = !!values.share?.value?.selected_options?.some(
-    (o) => o.value === POST_TO_GENERAL,
-  );
+  const postToGeneral = generalTicked(values);
 
   const errors: Record<string, string> = {};
   if (!title) errors.title = 'Please give your ticket a title.';
@@ -160,8 +143,33 @@ export function parseTicketSubmission(
   };
 }
 
-/** The form the Agent fills in to Resolve a Ticket. */
-export function resolveModal(ticketNumber: string): ModalView {
+/**
+ * The form the Agent fills in to Resolve a Ticket. For an `announced` Ticket, the Agent can also
+ * ask for an Announcement follow-up.
+ */
+export function resolveModal(ticketNumber: string, { announced = false } = {}): ModalView {
+  const blocks: ModalView['blocks'] = [
+    {
+      type: 'input',
+      block_id: 'note',
+      optional: true,
+      label: { type: 'plain_text', text: 'Resolution note' },
+      hint: {
+        type: 'plain_text',
+        text: announced
+          ? 'Sent to the requester. Also shown in #general if you tick the box below.'
+          : 'Sent to the requester.',
+      },
+      element: {
+        type: 'plain_text_input',
+        action_id: 'value',
+        multiline: true,
+        max_length: NOTE_MAX,
+        placeholder: { type: 'plain_text', text: 'e.g. Reset your password, please try again.' },
+      },
+    },
+  ];
+  if (announced) blocks.push(generalCheckbox('Also post the resolution in #general'));
   return {
     type: 'modal',
     callback_id: RESOLVE_TICKET_VIEW,
@@ -169,36 +177,47 @@ export function resolveModal(ticketNumber: string): ModalView {
     title: { type: 'plain_text', text: `Resolve ${ticketNumber}` },
     submit: { type: 'plain_text', text: 'Resolve' },
     close: { type: 'plain_text', text: 'Cancel' },
-    blocks: [
-      {
-        type: 'input',
-        block_id: 'note',
-        optional: true,
-        label: { type: 'plain_text', text: 'Resolution note' },
-        hint: { type: 'plain_text', text: 'Sent to the requester.' },
-        element: {
-          type: 'plain_text_input',
-          action_id: 'value',
-          multiline: true,
-          max_length: NOTE_MAX,
-          placeholder: { type: 'plain_text', text: 'e.g. Reset your password, please try again.' },
-        },
-      },
-    ],
+    blocks,
   };
 }
 
 export function parseResolveSubmission(view: ViewOutput): {
   ticketNumber: string;
   note?: string;
+  postFollowUp?: true;
 } {
-  const note = view.state.values.note?.value?.value?.trim();
-  return { ticketNumber: view.private_metadata, ...(note ? { note } : {}) };
+  const values = view.state.values;
+  const note = values.note?.value?.value?.trim();
+  const postFollowUp = generalTicked(values);
+  return {
+    ticketNumber: view.private_metadata,
+    ...(note ? { note } : {}),
+    ...(postFollowUp ? { postFollowUp } : {}),
+  };
 }
 
 /** Builds a permalink without an API call, so the modal opens within the trigger's 3s window. */
 export function messagePermalink(teamDomain: string, channelId: string, ts: string): string {
   return `https://${teamDomain}.slack.com/archives/${channelId}/p${ts.replace('.', '')}`;
+}
+
+/** An optional, unticked box asking to also post something in #general. */
+function generalCheckbox(text: string): ModalView['blocks'][number] {
+  return {
+    type: 'input',
+    block_id: 'share',
+    optional: true,
+    label: { type: 'plain_text', text: 'Visibility' },
+    element: {
+      type: 'checkboxes',
+      action_id: 'value',
+      options: [{ text: { type: 'plain_text', text }, value: POST_TO_GENERAL }],
+    },
+  };
+}
+
+function generalTicked(values: ViewOutput['state']['values']): boolean {
+  return !!values.share?.value?.selected_options?.some((o) => o.value === POST_TO_GENERAL);
 }
 
 function option(value: string) {
