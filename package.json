@@ -1,0 +1,32 @@
+{
+  "name": "slack-bots",
+  "private": true,
+  "description": "Playground monorepo of Slack bots hosted on AWS for (nearly) free",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "infra"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "vitest run",
+    "synth": "npm run synth -w infra"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.5",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.4"
+  }
+}

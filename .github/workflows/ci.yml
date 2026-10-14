@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Placeholders keep `cdk synth` working before the repository variables are set.
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '000000000000' }}
+  AWS_REGION: ${{ vars.AWS_REGION || 'ca-central-1' }}
+  AGENT_SLACK_USER_ID: ${{ vars.AGENT_SLACK_USER_ID || 'UPLACEHOLDER' }}
+  BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL || 'placeholder@example.com' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run synth
+
+  deploy:
+    needs: check
+    # Deploys only from main, and only once the AWS side is set up (see README).
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/slack-bots-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+      # SlackBots-GithubOidc is deliberately not deployed from CI: it defines CI's own access.
+      - run: npm run cdk -w infra -- deploy SlackBots-Shared SlackBots-ItTickets --require-approval never

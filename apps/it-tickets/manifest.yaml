@@ -1,0 +1,39 @@
+# Slack app manifest for the IT tickets bot.
+# Create the app at https://api.slack.com/apps → "Create New App" → "From a manifest".
+# Replace REPLACE_WITH_FUNCTION_URL with the `SlackRequestUrl` output of the SlackBots-ItTickets stack
+# (both occurrences), then paste the result under "App Manifest" again whenever it changes.
+display_information:
+  name: IT Tickets
+  description: Raise IT tickets without leaving Slack.
+  background_color: '#2c3e50'
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: true
+  bot_user:
+    display_name: IT Tickets
+    always_online: true
+  slash_commands:
+    - command: /ticket
+      url: REPLACE_WITH_FUNCTION_URL
+      description: Open an IT ticket
+      usage_hint: '[short title]'
+      should_escape: false
+  shortcuts:
+    - name: Create IT ticket
+      type: message
+      callback_id: ticket_from_message
+      description: Open an IT ticket from this message
+oauth_config:
+  scopes:
+    bot:
+      - commands
+      - chat:write
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: REPLACE_WITH_FUNCTION_URL
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

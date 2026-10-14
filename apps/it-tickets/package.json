@@ -1,0 +1,19 @@
+{
+  "name": "@slack-bots/it-tickets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1151.0",
+    "@aws-sdk/client-ssm": "^3.1151.0",
+    "@aws-sdk/lib-dynamodb": "^3.1151.0",
+    "@slack/bolt": "^5.1.0",
+    "@slack/types": "^3.2.0",
+    "@slack/web-api": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164"
+  }
+}
