@@ -7,6 +7,9 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { formatTicketNumber, type Status, type Ticket } from './ticket.js';
 
+/** A Ticket as read back from storage. Tickets opened before Agents were recorded have no `agentId`. */
+export type StoredTicket = Omit<Ticket, 'agentId'> & Partial<Pick<Ticket, 'agentId'>>;
+
 export type TicketChanges = Partial<
   Pick<Ticket, 'status' | 'takenAt' | 'resolvedAt' | 'resolutionNote'>
 >;
@@ -15,12 +18,12 @@ export interface TicketStore {
   /** Reserves the next Ticket number. Numbers are never reused. */
   nextNumber(): Promise<string>;
   create(ticket: Ticket): Promise<void>;
-  get(number: string): Promise<Ticket | undefined>;
+  get(number: string): Promise<StoredTicket | undefined>;
   /**
    * Applies `changes` only if the Ticket is currently in one of the `from` statuses.
    * Returns the updated Ticket, or undefined if it does not exist or its status didn't match.
    */
-  update(number: string, from: Status[], changes: TicketChanges): Promise<Ticket | undefined>;
+  update(number: string, from: Status[], changes: TicketChanges): Promise<StoredTicket | undefined>;
 }
 
 const COUNTER_KEY = 'COUNTER#ticket';
@@ -62,7 +65,7 @@ export class DynamoTicketStore implements TicketStore {
     );
   }
 
-  async get(number: string): Promise<Ticket | undefined> {
+  async get(number: string): Promise<StoredTicket | undefined> {
     const { Item } = await this.db.send(
       new GetCommand({ TableName: this.tableName, Key: { pk: ticketKey(number) } }),
     );
@@ -73,7 +76,7 @@ export class DynamoTicketStore implements TicketStore {
     number: string,
     from: Status[],
     changes: TicketChanges,
-  ): Promise<Ticket | undefined> {
+  ): Promise<StoredTicket | undefined> {
     const entries = Object.entries(changes).filter(([, value]) => value !== undefined);
     const names: Record<string, string> = { '#status': 'status' };
     const values: Record<string, unknown> = {};
@@ -104,7 +107,7 @@ export class DynamoTicketStore implements TicketStore {
   }
 }
 
-function toTicket(item: Record<string, unknown>): Ticket {
+function toTicket(item: Record<string, unknown>): StoredTicket {
   const { pk: _pk, ...ticket } = item;
-  return ticket as unknown as Ticket;
+  return ticket as unknown as StoredTicket;
 }

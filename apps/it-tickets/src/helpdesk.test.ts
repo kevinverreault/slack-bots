@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createHelpdesk, type Chat } from './helpdesk.js';
 import { MemoryTicketStore } from './memory-ticket-store.js';
-import type { TicketDraft } from './ticket.js';
+import type { Ticket, TicketDraft } from './ticket.js';
 
 const AGENT = 'UAGENT';
+const OTHER_AGENT = 'UOTHER';
 const REQUESTER = 'UREQ';
 const draft: TicketDraft = {
   title: 'VPN is down',
@@ -39,17 +40,16 @@ describe('helpdesk', () => {
   let store: MemoryTicketStore;
   let calls: Call[];
   let helpdesk: ReturnType<typeof createHelpdesk>;
+  /** Opens a Ticket as if `agentId` had been the configured Agent at the time. */
+  let openedFor: (agentId: string) => Promise<Ticket>;
 
   beforeEach(() => {
     store = new MemoryTicketStore();
     const fake = fakeChat();
     calls = fake.calls;
-    helpdesk = createHelpdesk({
-      store,
-      chat: fake.chat,
-      agentId: AGENT,
-      now: () => new Date('2026-10-14T12:00:00Z'),
-    });
+    const deps = { store, chat: fake.chat, now: () => new Date('2026-10-14T12:00:00Z') };
+    helpdesk = createHelpdesk({ ...deps, agentId: AGENT });
+    openedFor = (agentId) => createHelpdesk({ ...deps, agentId }).open(draft);
   });
 
   describe('open', () => {
@@ -62,6 +62,12 @@ describe('helpdesk', () => {
       expect(ticket.card).toEqual({ channel: `D${AGENT}`, ts: '100.1' });
       expect(ticket.confirmation).toEqual({ channel: `D${REQUESTER}`, ts: '100.2' });
       expect(await store.get('IT-0001')).toEqual(ticket);
+    });
+
+    it('records the Agent the Ticket was opened for', async () => {
+      const ticket = await helpdesk.open(draft);
+      expect(ticket.agentId).toBe(AGENT);
+      expect((await store.get(ticket.number))?.agentId).toBe(AGENT);
     });
 
     it('offers Take and Resolve on a new Ticket card', async () => {
@@ -119,6 +125,15 @@ describe('helpdesk', () => {
       expect(announcement.text).toContain(`handled by <@${AGENT}>`);
       expect(JSON.stringify(announcement.blocks)).toContain(`handled by <@${AGENT}>`);
     });
+
+    it("names the Ticket's own Agent, even when another Agent is configured", async () => {
+      const ticket = await openedFor(OTHER_AGENT);
+      calls.length = 0;
+
+      await helpdesk.announce(ticket);
+
+      expect(calls[0]!.args.text).toContain(`handled by <@${OTHER_AGENT}>`);
+    });
   });
 
   describe('take', () => {
@@ -156,6 +171,17 @@ describe('helpdesk', () => {
     it('reports unknown Tickets', async () => {
       expect(await helpdesk.take('IT-9999', AGENT)).toBe('not-found');
     });
+
+    it("is left to the Ticket's own Agent, even when another Agent is configured", async () => {
+      const ticket = await openedFor(OTHER_AGENT);
+      calls.length = 0;
+
+      expect(await helpdesk.take(ticket.number, AGENT)).toBe('not-agent');
+      expect(await helpdesk.take(ticket.number, OTHER_AGENT)).toBe('done');
+
+      expect((await store.get(ticket.number))?.status).toBe('In progress');
+      expect(calls[1]!.args.text).toContain(`<@${OTHER_AGENT}> has taken`);
+    });
   });
 
   describe('resolve', () => {
@@ -185,6 +211,25 @@ describe('helpdesk', () => {
       expect((await store.get(ticket.number))?.resolutionNote).toBeUndefined();
     });
 
+    it("is left to the Ticket's own Agent, even when another Agent is configured", async () => {
+      const ticket = await openedFor(OTHER_AGENT);
+      calls.length = 0;
+
+      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('not-agent');
+      expect(await helpdesk.resolve(ticket.number, OTHER_AGENT)).toBe('done');
+
+      expect((await store.get(ticket.number))?.status).toBe('Resolved');
+      expect(calls[1]!.args.text).toContain(`resolved by <@${OTHER_AGENT}>`);
+    });
+
+    it("lets only the Ticket's own Agent open the Resolve form", async () => {
+      const ticket = await openedFor(OTHER_AGENT);
+
+      expect(await helpdesk.isAgentOf(ticket.number, OTHER_AGENT)).toBe(true);
+      expect(await helpdesk.isAgentOf(ticket.number, AGENT)).toBe(false);
+      expect(await helpdesk.isAgentOf('IT-9999', AGENT)).toBe(false);
+    });
+
     it('never moves a Resolved Ticket', async () => {
       const ticket = await helpdesk.open(draft);
       await helpdesk.resolve(ticket.number, AGENT);
@@ -192,6 +237,28 @@ describe('helpdesk', () => {
       expect(await helpdesk.take(ticket.number, AGENT)).toBe('stale');
       expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('stale');
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
+    });
+  });
+
+  describe('a Ticket opened before Agents were recorded', () => {
+    /** Stores a Ticket the way it was stored before it had an `agentId`. */
+    async function legacyTicket(): Promise<string> {
+      const { agentId: _agentId, ...legacy } = await helpdesk.open(draft);
+      store.tickets.clear();
+      await store.create(legacy as Ticket);
+      calls.length = 0;
+      return legacy.number;
+    }
+
+    it('belongs to the configured Agent', async () => {
+      const number = await legacyTicket();
+
+      expect(await helpdesk.isAgentOf(number, AGENT)).toBe(true);
+      expect(await helpdesk.take(number, OTHER_AGENT)).toBe('not-agent');
+      expect(await helpdesk.take(number, AGENT)).toBe('done');
+      expect(calls[1]!.args.text).toContain(`<@${AGENT}> has taken`);
+      expect(await helpdesk.resolve(number, AGENT)).toBe('done');
+      expect(calls[3]!.args.text).toContain(`resolved by <@${AGENT}>`);
     });
   });
 });
