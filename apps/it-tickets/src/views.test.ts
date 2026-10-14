@@ -9,7 +9,13 @@ import {
 } from './views.js';
 
 function submission(
-  fields: { title?: string; description?: string; category?: string; urgency?: string },
+  fields: {
+    title?: string;
+    description?: string;
+    category?: string;
+    urgency?: string;
+    share?: string[];
+  },
   privateMetadata = '{}',
 ): ViewOutput {
   const text = (value?: string) => ({ value: { type: 'plain_text_input', value } });
@@ -24,6 +30,12 @@ function submission(
         description: text(fields.description),
         category: select(fields.category),
         urgency: select(fields.urgency),
+        share: {
+          value: {
+            type: 'checkboxes',
+            selected_options: (fields.share ?? []).map((value) => ({ value })),
+          },
+        },
       },
     },
   } as unknown as ViewOutput;
@@ -46,6 +58,14 @@ describe('parseTicketSubmission', () => {
         sourcePermalink: 'https://x.slack.com/archives/C1/p1',
       },
     });
+  });
+
+  it('flags the Ticket for #general only when the box is ticked', () => {
+    const fields = { title: 'T', description: 'D', category: 'Other', urgency: 'Low' };
+    const ticked = parseTicketSubmission(submission({ ...fields, share: ['general'] }), 'U1');
+    const unticked = parseTicketSubmission(submission(fields), 'U1');
+    expect(ticked.ok && ticked.value.postToGeneral).toBe(true);
+    expect(unticked.ok && 'postToGeneral' in unticked.value).toBe(false);
   });
 
   it('reports blank fields and unknown options against their blocks', () => {

@@ -1,5 +1,5 @@
 import type { App, MessageShortcut } from '@slack/bolt';
-import { createHelpdesk, type ActionOutcome, type Chat } from './helpdesk.js';
+import { createHelpdesk, GENERAL_CHANNEL, type ActionOutcome, type Chat } from './helpdesk.js';
 import { openFailed, RESOLVE_ACTION, TAKE_ACTION } from './messages.js';
 import type { TicketStore } from './ticket-store.js';
 import {
@@ -57,12 +57,22 @@ export function registerListeners(
       return;
     }
     await ack();
+    const desk = helpdesk(client.chat);
+    let ticket;
     try {
-      const ticket = await helpdesk(client.chat).open(parsed.value);
+      ticket = await desk.open(parsed.value);
       logger.info(`Opened ${ticket.number} for ${ticket.requesterId}`);
     } catch (err) {
       logger.error('Failed to open ticket', err);
       await client.chat.postMessage({ channel: body.user.id, ...openFailed() });
+      return;
+    }
+    if (!ticket.postToGeneral) return;
+    try {
+      await desk.announce(ticket);
+    } catch (err) {
+      // The Ticket is open and both sides know about it; a missing Announcement isn't worth alarming anyone.
+      logger.warn(`Failed to announce ${ticket.number} in ${GENERAL_CHANNEL}`, err);
     }
   });
 

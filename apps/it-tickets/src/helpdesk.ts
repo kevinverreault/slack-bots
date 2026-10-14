@@ -1,5 +1,6 @@
 import type { WebClient } from '@slack/web-api';
 import {
+  announcement,
   confirmation,
   resolvedUpdate,
   takenUpdate,
@@ -18,6 +19,9 @@ export interface HelpdeskDeps {
   agentId: string;
   now: () => Date;
 }
+
+/** Where Announcements go. Slack accepts a channel name here; `chat:write.public` lets the bot post without joining. */
+export const GENERAL_CHANNEL = '#general';
 
 export type ActionOutcome = 'done' | 'not-agent' | 'not-found' | 'stale';
 
@@ -68,6 +72,11 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
       const ticket: Ticket = { ...details, card, confirmation: confirmationRef };
       await store.create(ticket);
       return ticket;
+    },
+
+    /** Posts the Ticket in #general. Kept apart from `open` so a failure here can't undo an opened Ticket. */
+    async announce(ticket: Ticket): Promise<void> {
+      await post(GENERAL_CHANNEL, announcement(ticket));
     },
 
     take(ticketNumber: string, actorId: string): Promise<ActionOutcome> {

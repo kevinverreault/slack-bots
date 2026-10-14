@@ -5,15 +5,16 @@ This bot mimics a typical IT helpdesk Slack bot. Instead of feeding a ticketing 
 ## How it works
 
 1. A **Requester** runs `/ticket [title]`, or uses the **Create IT ticket** shortcut on any message. The shortcut pre-fills the description and links back to the message.
-2. The Requester fills in a modal with the title, description, **Category** and **Urgency**.
+2. The Requester fills in a modal with the title, description, **Category** and **Urgency**, and can tick a box to also post it in #general.
 3. The Ticket gets a **Ticket number** (`IT-0001`, `IT-0002`, …).
    - The Agent receives a **Ticket card** with **Take** and **Resolve** buttons.
    - The Requester receives a **Confirmation**. Updates arrive as replies in its thread.
+   - If the Requester ticked the box, an **Announcement** is posted in #general.
 4. **Take** moves the Ticket from Open to In progress.
 5. **Resolve** moves it from Open or In progress to Resolved, with an optional **Resolution note** for the Requester.
 6. The Ticket card updates in place and its buttons disappear once there's nothing left to do. Statuses never move backwards.
 
-Everything happens in DMs with the bot. Nothing is posted in channels.
+Everything happens in DMs with the bot. The only channel post is the opt-in Announcement in #general, which isn't updated as the Ticket's Status changes.
 
 ## Code map
 

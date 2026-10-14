@@ -90,6 +90,19 @@ describe('helpdesk', () => {
     });
   });
 
+  describe('announce', () => {
+    it('posts the Ticket in #general', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      calls.length = 0;
+
+      await helpdesk.announce(ticket);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.args.channel).toBe('#general');
+      expect(JSON.stringify(calls[0]!.args.blocks)).toContain(ticket.number);
+    });
+  });
+
   describe('take', () => {
     it('moves an Open Ticket to In progress, updates the card and tells the Requester in the thread', async () => {
       const ticket = await helpdesk.open(draft);
