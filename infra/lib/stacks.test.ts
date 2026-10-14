@@ -59,6 +59,22 @@ describe('GithubOidcStack', () => {
     });
   });
 
+  it('never deletes the GitHub OIDC provider it creates', () => {
+    template.hasResource('AWS::IAM::OIDCProvider', { DeletionPolicy: 'Retain' });
+  });
+
+  it('creates no provider when reusing an existing one', () => {
+    const reusing = Template.fromStack(
+      new GithubOidcStack(newApp(), 'Reuse', {
+        env,
+        githubRepo: 'me/repo',
+        existingProviderArn:
+          'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
+      }),
+    );
+    reusing.resourceCountIs('AWS::IAM::OIDCProvider', 0);
+  });
+
   it('can only assume the CDK bootstrap roles', () => {
     const policies = Object.values(template.findResources('AWS::IAM::Policy'));
     expect(policies).toHaveLength(1);

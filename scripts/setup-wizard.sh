@@ -260,9 +260,15 @@ ask AWS_REGION "AWS region:"
 write_env AWS_REGION "$AWS_REGION"
 OIDC_ARN=$(aws iam list-open-id-connect-providers --output text \
   --query "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn" 2>/dev/null || true)
-if [[ -n "$OIDC_ARN" && "$OIDC_ARN" != "None" ]]; then
+# A provider our own SlackBots-GithubOidc stack created is not "existing": importing it
+# would make CloudFormation delete it on the next deploy.
+OWNED_ARN=$(aws cloudformation describe-stack-resources --stack-name SlackBots-GithubOidc --region "$AWS_REGION" \
+  --query "StackResources[?ResourceType=='AWS::IAM::OIDCProvider'].PhysicalResourceId" --output text 2>/dev/null || true)
+if [[ -n "$OIDC_ARN" && "$OIDC_ARN" != "None" && "$OIDC_ARN" != "$OWNED_ARN" ]]; then
   note "This account already has a GitHub OIDC provider; reusing it."
   write_env GITHUB_OIDC_PROVIDER_ARN "$OIDC_ARN"
+elif [[ -n "$(_existing GITHUB_OIDC_PROVIDER_ARN || true)" ]]; then
+  write_env GITHUB_OIDC_PROVIDER_ARN ""   # empty = let the stack own the provider
 fi
 pause
 

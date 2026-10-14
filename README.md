@@ -77,4 +77,4 @@ cd infra
 npx cdk destroy SlackBots-ItTickets SlackBots-Shared SlackBots-GithubOidc
 ```
 
-The ticket table is deleted with its stack. Delete the two SSM parameters and the Slack app by hand.
+The ticket table is deleted with its stack. Delete the two SSM parameters and the Slack app by hand. The GitHub OIDC provider is deliberately kept, since it costs nothing and other projects may use it. Delete it in IAM → Identity providers if you want it gone.

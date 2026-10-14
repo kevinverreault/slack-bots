@@ -1,4 +1,4 @@
-import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
+import { CfnOutput, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import type { Construct } from 'constructs';
 
@@ -19,12 +19,17 @@ export class GithubOidcStack extends Stack {
   constructor(scope: Construct, id: string, props: GithubOidcStackProps) {
     super(scope, id, props);
 
-    const providerArn =
-      props.existingProviderArn ??
-      new iam.OidcProviderNative(this, 'GithubProvider', {
+    let providerArn = props.existingProviderArn;
+    if (!providerArn) {
+      const provider = new iam.OidcProviderNative(this, 'GithubProvider', {
         url: 'https://token.actions.githubusercontent.com',
         clientIds: ['sts.amazonaws.com'],
-      }).oidcProviderArn;
+      });
+      // Retained so that switching to `existingProviderArn` (or destroying this stack) never
+      // pulls the provider out from under a role that still trusts it. It's free to keep.
+      provider.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      providerArn = provider.oidcProviderArn;
+    }
 
     const role = new iam.Role(this, 'DeployRole', {
       roleName: DEPLOY_ROLE_NAME,
