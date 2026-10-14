@@ -20,6 +20,8 @@ export interface TicketDraft {
   requesterId: string;
   /** Link to the Slack message the Ticket was raised from, if any. */
   sourcePermalink?: string;
+  /** The Requester asked for an Announcement in #general. */
+  postToGeneral?: boolean;
 }
 
 export interface Ticket extends TicketDraft {

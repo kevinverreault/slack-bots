@@ -73,6 +73,18 @@ export function confirmation(ticket: TicketDetails): Message {
   };
 }
 
+/** The public post in #general for a Ticket whose Requester asked for one. */
+export function announcement(ticket: TicketDetails): Message {
+  return {
+    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}: ${ticket.title}`,
+    blocks: [
+      section(`📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}*`),
+      section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
+      detailFields(ticket, { includeStatus: false }),
+    ],
+  };
+}
+
 export function takenUpdate(ticket: TicketDetails, agentId: string): Message {
   const text = `🛠️ <@${agentId}> has taken *${ticket.number}* and is working on it.`;
   return { text, blocks: [section(text)] };

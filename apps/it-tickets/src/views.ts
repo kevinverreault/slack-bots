@@ -8,6 +8,7 @@ export const RESOLVE_TICKET_VIEW = 'resolve_ticket';
 const TITLE_MAX = 150;
 const DESCRIPTION_MAX = 2900;
 const NOTE_MAX = 2900;
+const POST_TO_GENERAL = 'general';
 
 interface TicketModalPrefill {
   title?: string;
@@ -82,6 +83,22 @@ export function ticketModal(prefill: TicketModalPrefill = {}): ModalView {
           initial_option: option('Normal'),
         },
       },
+      {
+        type: 'input',
+        block_id: 'share',
+        optional: true,
+        label: { type: 'plain_text', text: 'Visibility' },
+        element: {
+          type: 'checkboxes',
+          action_id: 'value',
+          options: [
+            {
+              text: { type: 'plain_text', text: 'Also post this ticket in #general' },
+              value: POST_TO_GENERAL,
+            },
+          ],
+        },
+      },
     ],
   };
 }
@@ -97,6 +114,9 @@ export function parseTicketSubmission(
   const description = values.description?.value?.value?.trim() ?? '';
   const category = values.category?.value?.selected_option?.value as Category | undefined;
   const urgency = values.urgency?.value?.selected_option?.value as Urgency | undefined;
+  const postToGeneral = !!values.share?.value?.selected_options?.some(
+    (o) => o.value === POST_TO_GENERAL,
+  );
 
   const errors: Record<string, string> = {};
   if (!title) errors.title = 'Please give your ticket a title.';
@@ -115,6 +135,7 @@ export function parseTicketSubmission(
       urgency: urgency!,
       requesterId,
       ...(metadata.sourcePermalink ? { sourcePermalink: metadata.sourcePermalink } : {}),
+      ...(postToGeneral ? { postToGeneral } : {}),
     },
   };
 }

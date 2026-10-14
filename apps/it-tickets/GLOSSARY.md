@@ -44,6 +44,10 @@ _Avoid_: Receipt, acknowledgement
 The private message the Agent receives for each Ticket. It shows the Ticket's details and the actions available at its current Status, and it is kept up to date as the Status changes.
 _Avoid_: Notification, alert
 
+**Announcement**:
+An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is not updated afterwards.
+_Avoid_: Broadcast, share
+
 **Category**:
 The kind of IT problem a Ticket concerns: Hardware, Software, Access, Network or Other.
 _Avoid_: Type, topic
