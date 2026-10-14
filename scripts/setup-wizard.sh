@@ -273,14 +273,30 @@ fi
 pause
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
-stage "Agent & budget alert"
-say "The Agent is the Slack user who receives every ticket (you, for this PoC)."
-step "In Slack: click your avatar → Profile → ⋮ (More) → Copy member ID."
-until ask AGENT_SLACK_USER_ID "Paste the member ID (starts with U or W):" \
-  && [[ "$AGENT_SLACK_USER_ID" =~ ^[UW][A-Z0-9]{6,}$ ]]; do
-  warn "That doesn't look like a Slack member ID."
+stage "Agents & budget alert"
+say "Agents are the Slack users a Requester can send a ticket to (just you, for this PoC)."
+say "The first one also owns tickets opened before Requesters picked an Agent."
+step "In Slack: open each Agent's profile → ⋮ (More) → Copy member ID."
+# agent_ids_ok "U1,U2" succeeds when every comma-separated entry looks like a Slack member ID.
+agent_ids_ok() {
+  local id ids=()
+  IFS=',' read -ra ids <<<"$1"
+  (( ${#ids[@]} )) || { warn "Enter at least one member ID."; return 1; }
+  for id in "${ids[@]}"; do
+    [[ "$id" =~ ^[UW][A-Z0-9]{6,}$ ]] || { warn "\"$id\" doesn't look like a Slack member ID."; return 1; }
+  done
+}
+# Set up before Agents became a list? Offer the old single Agent as the default.
+OLD_AGENT=$(_existing AGENT_SLACK_USER_ID || true)
+if [[ -z "$(_existing AGENT_SLACK_USER_IDS || true)" && -n "$OLD_AGENT" ]]; then
+  write_env AGENT_SLACK_USER_IDS "$OLD_AGENT"
+fi
+until ask AGENT_SLACK_USER_IDS "Paste the member IDs, comma-separated (each starts with U or W):" \
+  && AGENT_SLACK_USER_IDS=${AGENT_SLACK_USER_IDS//[[:space:]]/} \
+  && agent_ids_ok "$AGENT_SLACK_USER_IDS"; do
+  :
 done
-write_env AGENT_SLACK_USER_ID "$AGENT_SLACK_USER_ID"
+write_env AGENT_SLACK_USER_IDS "$AGENT_SLACK_USER_IDS"
 say "AWS emails this address if the monthly bill goes over \$1."
 until ask BUDGET_ALERT_EMAIL "Budget alert email:" && [[ "$BUDGET_ALERT_EMAIL" == *@*.* ]]; do
   warn "Please enter an email address."
@@ -314,7 +330,7 @@ stage "GitHub repository variables"
 say "CI reads these to synthesize and deploy. None of them is secret."
 set_var AWS_ACCOUNT_ID "$AWS_ACCOUNT_ID"
 set_var AWS_REGION "$AWS_REGION"
-set_var AGENT_SLACK_USER_ID "$AGENT_SLACK_USER_ID"
+set_var AGENT_SLACK_USER_IDS "$AGENT_SLACK_USER_IDS"
 set_var BUDGET_ALERT_EMAIL "$BUDGET_ALERT_EMAIL"
 pause
 
@@ -361,7 +377,8 @@ fi
 open_url "https://api.slack.com/apps?new_app=1"
 step "Choose 'From a manifest', pick your workspace → Next."
 step "Select the YAML tab, replace its content with the clipboard → Next → Create."
-step "(App created on an earlier run? Open it → App Manifest → paste → Save instead.)"
+step "(App created on an earlier run? Open it → App Manifest → paste → Save instead,"
+step " then reinstall it when Slack asks, so it gets any new scopes such as users:read.)"
 step "Left menu → Install App → Install to <workspace> → Allow."
 pause "Press Enter once the app is installed"
 
@@ -391,7 +408,7 @@ pause
 # ── 9 ─────────────────────────────────────────────────────────────────────
 stage "Try it"
 open_url "slack://open"
-step "In any channel type:  /ticket Test ticket  → fill in the modal → Open ticket."
+step "In any channel type:  /ticket Test ticket  → fill in the modal, picking yourself as the Agent → Open ticket."
 step "The IT Tickets app DMs you a Confirmation and, as the Agent, a Ticket card."
 step "On the card click Take, then Resolve with a note; watch the Confirmation thread."
 LOG_GROUP=$(aws cloudformation describe-stack-resources --stack-name "$STACK" --region "$AWS_REGION" \

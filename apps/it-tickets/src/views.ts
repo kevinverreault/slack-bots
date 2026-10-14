@@ -1,5 +1,6 @@
 import type { ViewOutput } from '@slack/bolt';
 import type { ModalView } from '@slack/types';
+import type { AgentChoice } from './agents.js';
 import { CATEGORIES, URGENCIES, type Category, type TicketDraft, type Urgency } from './ticket.js';
 
 export const OPEN_TICKET_VIEW = 'open_ticket';
@@ -10,7 +11,7 @@ const DESCRIPTION_MAX = 2900;
 const NOTE_MAX = 2900;
 const POST_TO_GENERAL = 'general';
 
-interface TicketModalPrefill {
+export interface TicketModalPrefill {
   title?: string;
   description?: string;
   sourcePermalink?: string;
@@ -20,8 +21,8 @@ interface TicketModalMetadata {
   sourcePermalink?: string;
 }
 
-/** The form a Requester fills in to open a Ticket. */
-export function ticketModal(prefill: TicketModalPrefill = {}): ModalView {
+/** The form a Requester fills in to open a Ticket, choosing one of `agents` to send it to. */
+export function ticketModal(agents: AgentChoice[], prefill: TicketModalPrefill = {}): ModalView {
   const metadata: TicketModalMetadata = { sourcePermalink: prefill.sourcePermalink };
   return {
     type: 'modal',
@@ -85,6 +86,20 @@ export function ticketModal(prefill: TicketModalPrefill = {}): ModalView {
       },
       {
         type: 'input',
+        block_id: 'agent',
+        label: { type: 'plain_text', text: 'Agent' },
+        element: {
+          type: 'static_select',
+          action_id: 'value',
+          placeholder: { type: 'plain_text', text: 'Pick the Agent to send it to' },
+          options: agents.map(({ id, name }) => ({
+            text: { type: 'plain_text', text: name },
+            value: id,
+          })),
+        },
+      },
+      {
+        type: 'input',
         block_id: 'share',
         optional: true,
         label: { type: 'plain_text', text: 'Visibility' },
@@ -105,15 +120,18 @@ export function ticketModal(prefill: TicketModalPrefill = {}): ModalView {
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; errors: Record<string, string> };
 
+/** Reads a submitted ticket modal. The chosen Agent must be one of `agentIds`. */
 export function parseTicketSubmission(
   view: ViewOutput,
   requesterId: string,
+  agentIds: readonly string[],
 ): ParseResult<TicketDraft> {
   const values = view.state.values;
   const title = values.title?.value?.value?.trim() ?? '';
   const description = values.description?.value?.value?.trim() ?? '';
   const category = values.category?.value?.selected_option?.value as Category | undefined;
   const urgency = values.urgency?.value?.selected_option?.value as Urgency | undefined;
+  const agentId = values.agent?.value?.selected_option?.value;
   const postToGeneral = !!values.share?.value?.selected_options?.some(
     (o) => o.value === POST_TO_GENERAL,
   );
@@ -123,6 +141,7 @@ export function parseTicketSubmission(
   if (!description) errors.description = 'Please describe the problem.';
   if (!category || !CATEGORIES.includes(category)) errors.category = 'Please pick a category.';
   if (!urgency || !URGENCIES.includes(urgency)) errors.urgency = 'Please pick an urgency.';
+  if (!agentId || !agentIds.includes(agentId)) errors.agent = 'Please pick an Agent from the list.';
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const metadata = parseMetadata(view.private_metadata);
@@ -134,6 +153,7 @@ export function parseTicketSubmission(
       category: category!,
       urgency: urgency!,
       requesterId,
+      agentId: agentId!,
       ...(metadata.sourcePermalink ? { sourcePermalink: metadata.sourcePermalink } : {}),
       ...(postToGeneral ? { postToGeneral } : {}),
     },

@@ -13,7 +13,7 @@ env:
   # Placeholders keep `cdk synth` working before the repository variables are set.
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID || '000000000000' }}
   AWS_REGION: ${{ vars.AWS_REGION || 'ca-central-1' }}
-  AGENT_SLACK_USER_ID: ${{ vars.AGENT_SLACK_USER_ID || 'UPLACEHOLDER' }}
+  AGENT_SLACK_USER_IDS: ${{ vars.AGENT_SLACK_USER_IDS || 'UPLACEHOLDER' }}
   BUDGET_ALERT_EMAIL: ${{ vars.BUDGET_ALERT_EMAIL || 'placeholder@example.com' }}
 
 jobs:
@@ -42,6 +42,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      # No placeholder here: deploying without the real Agents must fail, not route Tickets to nobody.
+      AGENT_SLACK_USER_IDS: ${{ vars.AGENT_SLACK_USER_IDS }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

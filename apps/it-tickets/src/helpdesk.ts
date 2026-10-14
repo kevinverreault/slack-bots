@@ -16,8 +16,8 @@ export type Chat = Pick<WebClient['chat'], 'postMessage' | 'update'>;
 export interface HelpdeskDeps {
   store: TicketStore;
   chat: Chat;
-  /** The configured Agent: given to each newly opened Ticket, and assumed for stored Tickets without one. */
-  agentId: string;
+  /** The Agent assumed for stored Tickets opened before Agents were recorded. */
+  legacyAgentId: string;
   now: () => Date;
 }
 
@@ -27,7 +27,7 @@ export const GENERAL_CHANNEL = '#general';
 export type ActionOutcome = 'done' | 'not-agent' | 'not-found' | 'stale';
 
 /** The Ticket lifecycle: open, Take, Resolve, and the Slack messages each step produces. */
-export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
+export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps) {
   async function post(channel: string, message: Message, threadTs?: string): Promise<MessageRef> {
     const res = await chat.postMessage({ channel, ...message, thread_ts: threadTs });
     if (!res.channel || !res.ts) throw new Error(`chat.postMessage to ${channel} returned no ts`);
@@ -38,9 +38,9 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
     await chat.update({ ...ticket.card, ...ticketCard(ticket) });
   }
 
-  /** Tickets opened before Agents were recorded belong to the configured Agent. */
+  /** Tickets opened before Agents were recorded belong to the legacy Agent. */
   function withAgent(stored: StoredTicket): Ticket {
-    return { ...stored, agentId: stored.agentId ?? agentId };
+    return { ...stored, agentId: stored.agentId ?? legacyAgentId };
   }
 
   async function findTicket(ticketNumber: string): Promise<Ticket | undefined> {
@@ -77,11 +77,10 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
       const details: TicketDetails = {
         ...draft,
         number: await store.nextNumber(),
-        agentId,
         status: 'Open',
         createdAt: now().toISOString(),
       };
-      // Post to the Agent first: a misconfigured Agent fails before the Requester is told anything.
+      // Post to the Agent first: an Agent who can't be messaged fails before the Requester is told anything.
       const card = await post(details.agentId, ticketCard(details));
       const confirmationRef = await post(draft.requesterId, confirmation(details));
       const ticket: Ticket = { ...details, card, confirmation: confirmationRef };

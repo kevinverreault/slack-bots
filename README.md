@@ -2,9 +2,9 @@
 
 A playground of Slack bots running on AWS for (nearly) $0. These are proof-of-concept bots built for fun, not for production.
 
-| Bot                            | What it does                                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| [IT Tickets](apps/it-tickets/) | Raise IT tickets from Slack with `/ticket` or a message shortcut. Every ticket goes to one configured Agent. |
+| Bot                            | What it does                                                                                                         |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| [IT Tickets](apps/it-tickets/) | Raise IT tickets from Slack with `/ticket` or a message shortcut. Each ticket goes to the Agent the Requester picks. |
 
 ## Layout
 
@@ -43,7 +43,7 @@ bash scripts/setup-wizard.sh
 
 To do it by hand instead:
 
-1. **Configure locally.** Copy `infra/.env.example` to `infra/.env` and fill it in. To find your Slack member ID (the Agent), open your Slack profile and choose ⋮ → _Copy member ID_.
+1. **Configure locally.** Copy `infra/.env.example` to `infra/.env` and fill it in. `AGENT_SLACK_USER_IDS` is the comma-separated list of Slack member IDs a Requester can pick an Agent from (one ID is fine). To find someone's member ID, open their Slack profile and choose ⋮ → _Copy member ID_.
 2. **Bootstrap CDK and create GitHub's deploy role.** This is the only stack that's ever deployed by hand:
    ```bash
    cd infra
@@ -55,20 +55,26 @@ To do it by hand instead:
    ```bash
    gh variable set AWS_ACCOUNT_ID --body 123456789012
    gh variable set AWS_REGION --body ca-central-1
-   gh variable set AGENT_SLACK_USER_ID --body U0123456789
+   gh variable set AGENT_SLACK_USER_IDS --body U0123456789,U0987654321
    gh variable set BUDGET_ALERT_EMAIL --body you@example.com
    ```
 4. **Deploy.** Run the CI workflow (_Actions → CI → Run workflow_, or `gh workflow run CI`). Then read the bot's URL from the `SlackRequestUrl` stack output:
    ```bash
    aws cloudformation describe-stacks --stack-name SlackBots-ItTickets --query "Stacks[0].Outputs" --region ca-central-1
    ```
-5. **Create the Slack app.** At <https://api.slack.com/apps>, choose _Create New App → From a manifest_, and paste [apps/it-tickets/manifest.yaml](apps/it-tickets/manifest.yaml) with both `REPLACE_WITH_FUNCTION_URL` placeholders replaced by that URL. Install the app to your workspace.
+5. **Create the Slack app.** At <https://api.slack.com/apps>, choose _Create New App → From a manifest_, and paste [apps/it-tickets/manifest.yaml](apps/it-tickets/manifest.yaml) with both `REPLACE_WITH_FUNCTION_URL` placeholders replaced by that URL. Install the app to your workspace. If the app already exists, paste the manifest under _App Manifest_ instead and reinstall the app when Slack asks: it only gets newly added scopes, such as `users:read` for showing Agents' names, once reinstalled.
 6. **Store the Slack secrets in SSM.** These SecureString parameters are free. Use the AWS console (Systems Manager → Parameter Store) to keep the values out of your shell history:
    - `/slack-bots/it-tickets/bot-token`: _OAuth & Permissions → Bot User OAuth Token_ (`xoxb-…`)
    - `/slack-bots/it-tickets/signing-secret`: _Basic Information → Signing Secret_
 7. Type `/ticket` in Slack.
 
 If you rotate a secret, re-run the workflow (step 4). This starts fresh Lambdas, which read the new value.
+
+**Set up before Agents became a list?** `AGENT_SLACK_USER_ID` has been replaced by `AGENT_SLACK_USER_IDS`, and deploys fail until the new GitHub variable is set. Rename it in `infra/.env` too. List the old Agent first: Tickets opened before Requesters picked an Agent belong to the first one.
+
+```bash
+gh variable set AGENT_SLACK_USER_IDS --body U0123456789
+```
 
 ### Teardown
 

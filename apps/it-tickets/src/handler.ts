@@ -1,5 +1,6 @@
 import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { App, AwsLambdaReceiver, LogLevel } from '@slack/bolt';
+import { parseAgentIds } from './agents.js';
 import { registerListeners } from './listeners.js';
 import { DynamoTicketStore } from './ticket-store.js';
 
@@ -32,7 +33,7 @@ async function init(): Promise<AwsHandler> {
   });
   registerListeners(app, {
     store: new DynamoTicketStore(requireEnv('TABLE_NAME')),
-    agentId: requireEnv('AGENT_SLACK_USER_ID'),
+    agentIds: parseAgentIds(requireEnv('AGENT_SLACK_USER_IDS')),
   });
   return receiver.start();
 }
