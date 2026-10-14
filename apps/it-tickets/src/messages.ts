@@ -61,11 +61,11 @@ export function ticketCard(ticket: TicketDetails): Message {
 }
 
 /** What the Requester receives when their Ticket is opened; later updates thread under it. */
-export function confirmation(ticket: TicketDetails): Message {
+export function confirmation(ticket: TicketDetails, agentId: string): Message {
   return {
-    text: `Your ticket ${ticket.number} has been opened: ${ticket.title}`,
+    text: `Your ticket ${ticket.number} has been opened, <@${agentId}> will be in touch: ${ticket.title}`,
     blocks: [
-      section(`✅ Your ticket *${ticket.number}* has been opened. IT will be in touch.`),
+      section(`✅ Your ticket *${ticket.number}* has been opened. <@${agentId}> will be in touch.`),
       section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
       detailFields(ticket, { includeStatus: false }),
       context('Updates on this ticket will appear in this thread.'),
@@ -74,11 +74,13 @@ export function confirmation(ticket: TicketDetails): Message {
 }
 
 /** The public post in #general for a Ticket whose Requester asked for one. */
-export function announcement(ticket: TicketDetails): Message {
+export function announcement(ticket: TicketDetails, agentId: string): Message {
   return {
-    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}: ${ticket.title}`,
+    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${agentId}>: ${ticket.title}`,
     blocks: [
-      section(`📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}*`),
+      section(
+        `📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}* · handled by <@${agentId}>`,
+      ),
       section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
       detailFields(ticket, { includeStatus: false }),
     ],

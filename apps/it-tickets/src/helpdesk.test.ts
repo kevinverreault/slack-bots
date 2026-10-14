@@ -69,6 +69,13 @@ describe('helpdesk', () => {
       expect(buttonsOf(calls[0]!)).toEqual(['ticket_take', 'ticket_resolve']);
     });
 
+    it('names the Agent in the Confirmation', async () => {
+      await helpdesk.open(draft);
+      const confirmation = calls[1]!.args;
+      expect(confirmation.text).toContain(`<@${AGENT}> will be in touch`);
+      expect(JSON.stringify(confirmation.blocks)).toContain(`<@${AGENT}> will be in touch`);
+    });
+
     it('gives each Ticket the next number', async () => {
       await helpdesk.open(draft);
       expect((await helpdesk.open(draft)).number).toBe('IT-0002');
@@ -100,6 +107,17 @@ describe('helpdesk', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]!.args.channel).toBe('#general');
       expect(JSON.stringify(calls[0]!.args.blocks)).toContain(ticket.number);
+    });
+
+    it('names the Agent in the Announcement', async () => {
+      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+      calls.length = 0;
+
+      await helpdesk.announce(ticket);
+
+      const announcement = calls[0]!.args;
+      expect(announcement.text).toContain(`handled by <@${AGENT}>`);
+      expect(JSON.stringify(announcement.blocks)).toContain(`handled by <@${AGENT}>`);
     });
   });
 
