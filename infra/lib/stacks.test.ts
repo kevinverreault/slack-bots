@@ -10,25 +10,31 @@ const newApp = () => new App({ context: { 'aws:cdk:bundling-stacks': [] } });
 
 describe('ItTicketsStack', () => {
   const template = Template.fromStack(
-    new ItTicketsStack(newApp(), 'Test', { env, agentSlackUserId: 'UAGENT' }),
+    new ItTicketsStack(newApp(), 'Test', { env, agentSlackUserIds: ['UANA', 'UBEN'] }),
   );
 
   it('exposes the bot through a public Function URL', () => {
     template.hasResourceProperties('AWS::Lambda::Url', { AuthType: 'NONE' });
   });
 
-  it('configures the Agent and secret names, never the secrets themselves', () => {
+  it('configures the Agents and secret names, never the secrets themselves', () => {
     template.hasResourceProperties('AWS::Lambda::Function', {
       Runtime: 'nodejs22.x',
       MemorySize: 1024,
       Environment: {
         Variables: Match.objectLike({
-          AGENT_SLACK_USER_ID: 'UAGENT',
+          AGENT_SLACK_USER_IDS: 'UANA,UBEN',
           BOT_TOKEN_PARAM: '/slack-bots/it-tickets/bot-token',
           SIGNING_SECRET_PARAM: '/slack-bots/it-tickets/signing-secret',
         }),
       },
     });
+  });
+
+  it('refuses to deploy without an Agent', () => {
+    expect(() => new ItTicketsStack(newApp(), 'NoAgents', { env, agentSlackUserIds: [] })).toThrow(
+      'at least one Agent',
+    );
   });
 
   it('keeps logs for a week and deletes the table with the stack', () => {

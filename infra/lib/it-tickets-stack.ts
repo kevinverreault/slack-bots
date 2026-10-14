@@ -10,14 +10,15 @@ import type { Construct } from 'constructs';
 export const SSM_PREFIX = '/slack-bots/it-tickets';
 
 export interface ItTicketsStackProps extends StackProps {
-  /** Slack user ID of the Agent who receives every Ticket. */
-  agentSlackUserId: string;
+  /** Slack member IDs of the Agents a Requester can send a Ticket to. The first also owns Tickets opened before Agents were recorded. */
+  agentSlackUserIds: string[];
 }
 
 /** The IT tickets bot: one Lambda behind a Function URL, plus a table for Tickets. */
 export class ItTicketsStack extends Stack {
   constructor(scope: Construct, id: string, props: ItTicketsStackProps) {
     super(scope, id, props);
+    if (props.agentSlackUserIds.length === 0) throw new Error('Configure at least one Agent');
 
     const table = new dynamodb.TableV2(this, 'Tickets', {
       partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
@@ -43,7 +44,7 @@ export class ItTicketsStack extends Stack {
       }),
       environment: {
         TABLE_NAME: table.tableName,
-        AGENT_SLACK_USER_ID: props.agentSlackUserId,
+        AGENT_SLACK_USER_IDS: props.agentSlackUserIds.join(','),
         BOT_TOKEN_PARAM: botTokenParam,
         SIGNING_SECRET_PARAM: signingSecretParam,
         NODE_OPTIONS: '--enable-source-maps',

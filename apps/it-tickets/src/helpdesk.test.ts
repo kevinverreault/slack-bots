@@ -12,6 +12,7 @@ const draft: TicketDraft = {
   category: 'Network',
   urgency: 'High',
   requesterId: REQUESTER,
+  agentId: AGENT,
 };
 
 interface Call {
@@ -40,16 +41,20 @@ describe('helpdesk', () => {
   let store: MemoryTicketStore;
   let calls: Call[];
   let helpdesk: ReturnType<typeof createHelpdesk>;
-  /** Opens a Ticket as if `agentId` had been the configured Agent at the time. */
+  /** Opens a Ticket for the Agent the Requester chose. */
   let openedFor: (agentId: string) => Promise<Ticket>;
 
   beforeEach(() => {
     store = new MemoryTicketStore();
     const fake = fakeChat();
     calls = fake.calls;
-    const deps = { store, chat: fake.chat, now: () => new Date('2026-10-14T12:00:00Z') };
-    helpdesk = createHelpdesk({ ...deps, agentId: AGENT });
-    openedFor = (agentId) => createHelpdesk({ ...deps, agentId }).open(draft);
+    helpdesk = createHelpdesk({
+      store,
+      chat: fake.chat,
+      legacyAgentId: AGENT,
+      now: () => new Date('2026-10-14T12:00:00Z'),
+    });
+    openedFor = (agentId) => helpdesk.open({ ...draft, agentId });
   });
 
   describe('open', () => {
@@ -64,10 +69,21 @@ describe('helpdesk', () => {
       expect(await store.get('IT-0001')).toEqual(ticket);
     });
 
-    it('records the Agent the Ticket was opened for', async () => {
-      const ticket = await helpdesk.open(draft);
-      expect(ticket.agentId).toBe(AGENT);
-      expect((await store.get(ticket.number))?.agentId).toBe(AGENT);
+    it('records the Agent the Requester chose', async () => {
+      const ticket = await openedFor(OTHER_AGENT);
+      expect(ticket.agentId).toBe(OTHER_AGENT);
+      expect((await store.get(ticket.number))?.agentId).toBe(OTHER_AGENT);
+    });
+
+    it('sends each Ticket card to the Agent the Requester chose, and names them in the Confirmation', async () => {
+      const first = await openedFor(AGENT);
+      const second = await openedFor(OTHER_AGENT);
+
+      expect(first.card.channel).toBe(`D${AGENT}`);
+      expect(second.card.channel).toBe(`D${OTHER_AGENT}`);
+      expect(calls.map((c) => c.args.channel)).toEqual([AGENT, REQUESTER, OTHER_AGENT, REQUESTER]);
+      expect(calls[1]!.args.text).toContain(`<@${AGENT}> will be in touch`);
+      expect(calls[3]!.args.text).toContain(`<@${OTHER_AGENT}> will be in touch`);
     });
 
     it('offers Take and Resolve on a new Ticket card', async () => {
@@ -90,7 +106,7 @@ describe('helpdesk', () => {
     it('stores nothing if the Agent cannot be messaged', async () => {
       const failing = createHelpdesk({
         store,
-        agentId: AGENT,
+        legacyAgentId: AGENT,
         now: () => new Date(),
         chat: {
           postMessage: async () => {
@@ -126,7 +142,7 @@ describe('helpdesk', () => {
       expect(JSON.stringify(announcement.blocks)).toContain(`handled by <@${AGENT}>`);
     });
 
-    it("names the Ticket's own Agent, even when another Agent is configured", async () => {
+    it('names the Agent the Requester chose', async () => {
       const ticket = await openedFor(OTHER_AGENT);
       calls.length = 0;
 
@@ -172,7 +188,7 @@ describe('helpdesk', () => {
       expect(await helpdesk.take('IT-9999', AGENT)).toBe('not-found');
     });
 
-    it("is left to the Ticket's own Agent, even when another Agent is configured", async () => {
+    it("is left to the Ticket's own Agent, not any other Agent", async () => {
       const ticket = await openedFor(OTHER_AGENT);
       calls.length = 0;
 
@@ -211,7 +227,7 @@ describe('helpdesk', () => {
       expect((await store.get(ticket.number))?.resolutionNote).toBeUndefined();
     });
 
-    it("is left to the Ticket's own Agent, even when another Agent is configured", async () => {
+    it("is left to the Ticket's own Agent, not any other Agent", async () => {
       const ticket = await openedFor(OTHER_AGENT);
       calls.length = 0;
 
@@ -250,7 +266,7 @@ describe('helpdesk', () => {
       return legacy.number;
     }
 
-    it('belongs to the configured Agent', async () => {
+    it('belongs to the legacy Agent', async () => {
       const number = await legacyTicket();
 
       expect(await helpdesk.isAgentOf(number, AGENT)).toBe(true);

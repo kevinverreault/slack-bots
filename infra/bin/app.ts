@@ -38,5 +38,12 @@ new SharedStack(app, 'SlackBots-Shared', {
 new ItTicketsStack(app, 'SlackBots-ItTickets', {
   env,
   tags: { ...tags, bot: 'it-tickets' },
-  agentSlackUserId: requireEnv('AGENT_SLACK_USER_ID'),
+  agentSlackUserIds: [
+    ...new Set(
+      requireEnv('AGENT_SLACK_USER_IDS')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ],
 });

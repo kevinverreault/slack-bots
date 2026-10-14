@@ -1,11 +1,11 @@
 # IT Tickets
 
-A Slack bot that mimics a typical IT helpdesk bot. Instead of feeding a ticketing system, every Ticket goes to one designated Agent.
+A Slack bot that mimics a typical IT helpdesk bot. Instead of feeding a ticketing system, each Ticket goes to the Agent its Requester picks.
 
 ## Language
 
 **Ticket**:
-A request for IT help raised by a Requester, made up of a title, a description, a Category and an Urgency.
+A request for IT help raised by a Requester, made up of a title, a description, a Category and an Urgency, and sent to one Agent.
 _Avoid_: Issue, request, case, incident
 
 **Ticket number**:
@@ -33,7 +33,7 @@ The Slack user who raised a Ticket.
 _Avoid_: Reporter, customer, submitter
 
 **Agent**:
-The single Slack user, fixed by configuration, who receives and works on every Ticket.
+One of the Slack users, fixed by configuration, whom a Requester can pick to receive a Ticket. A Ticket's Agent never changes, and only they work on it.
 _Avoid_: Assignee, admin, handler, configured user
 
 **Confirmation**:
@@ -41,7 +41,7 @@ The private message the Requester receives when their Ticket is opened. Every la
 _Avoid_: Receipt, acknowledgement
 
 **Ticket card**:
-The private message the Agent receives for each Ticket. It shows the Ticket's details and the actions available at its current Status, and it is kept up to date as the Status changes.
+The private message a Ticket's Agent receives for it. It shows the Ticket's details and the actions available at its current Status, and it is kept up to date as the Status changes.
 _Avoid_: Notification, alert
 
 **Announcement**:
