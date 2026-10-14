@@ -68,7 +68,7 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
       };
       // Post to the Agent first: a misconfigured Agent fails before the Requester is told anything.
       const card = await post(agentId, ticketCard(details));
-      const confirmationRef = await post(draft.requesterId, confirmation(details));
+      const confirmationRef = await post(draft.requesterId, confirmation(details, agentId));
       const ticket: Ticket = { ...details, card, confirmation: confirmationRef };
       await store.create(ticket);
       return ticket;
@@ -76,7 +76,7 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
 
     /** Posts the Ticket in #general. Kept apart from `open` so a failure here can't undo an opened Ticket. */
     async announce(ticket: Ticket): Promise<void> {
-      await post(GENERAL_CHANNEL, announcement(ticket));
+      await post(GENERAL_CHANNEL, announcement(ticket, agentId));
     },
 
     take(ticketNumber: string, actorId: string): Promise<ActionOutcome> {
