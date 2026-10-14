@@ -35,6 +35,14 @@ GitHub Actions ([ci.yml](.github/workflows/ci.yml)) lints, typechecks, tests and
 
 You need admin AWS credentials on your machine (AWS CLI v2 recommended) and a Slack workspace where you can install apps.
 
+The quickest route is the guided wizard. It walks through every step below, fills in `infra/.env`, sets the GitHub variables, and stores the Slack secrets in SSM:
+
+```bash
+bash scripts/setup-wizard.sh
+```
+
+To do it by hand instead:
+
 1. **Configure locally.** Copy `infra/.env.example` to `infra/.env` and fill it in. To find your Slack member ID (the Agent), open your Slack profile and choose ⋮ → _Copy member ID_.
 2. **Bootstrap CDK and create GitHub's deploy role.** This is the only stack that's ever deployed by hand:
    ```bash
