@@ -26,6 +26,8 @@ export interface TicketDraft {
 
 export interface Ticket extends TicketDraft {
   number: string;
+  /** The Agent the Ticket was opened for: the only one who may Take or Resolve it. */
+  agentId: string;
   status: Status;
   createdAt: string;
   takenAt?: string;

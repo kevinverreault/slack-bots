@@ -86,10 +86,11 @@ export function registerListeners(
   app.action(RESOLVE_ACTION, async ({ ack, body, action, client }) => {
     await ack();
     if (action.type !== 'button' || !('trigger_id' in body)) return;
-    if (body.user.id !== agentId) return;
+    const ticketNumber = action.value ?? '';
+    if (!(await helpdesk(client.chat).isAgentOf(ticketNumber, body.user.id))) return;
     await client.views.open({
       trigger_id: body.trigger_id,
-      view: resolveModal(action.value ?? ''),
+      view: resolveModal(ticketNumber),
     });
   });
 

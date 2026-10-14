@@ -9,13 +9,14 @@ import {
   type TicketDetails,
 } from './messages.js';
 import type { MessageRef, Ticket, TicketDraft } from './ticket.js';
-import type { TicketStore } from './ticket-store.js';
+import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
 
 export type Chat = Pick<WebClient['chat'], 'postMessage' | 'update'>;
 
 export interface HelpdeskDeps {
   store: TicketStore;
   chat: Chat;
+  /** The configured Agent: given to each newly opened Ticket, and assumed for stored Tickets without one. */
   agentId: string;
   now: () => Date;
 }
@@ -37,22 +38,35 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
     await chat.update({ ...ticket.card, ...ticketCard(ticket) });
   }
 
+  /** Tickets opened before Agents were recorded belong to the configured Agent. */
+  function withAgent(stored: StoredTicket): Ticket {
+    return { ...stored, agentId: stored.agentId ?? agentId };
+  }
+
+  async function findTicket(ticketNumber: string): Promise<Ticket | undefined> {
+    const stored = await store.get(ticketNumber);
+    return stored && withAgent(stored);
+  }
+
   async function transition(
     ticketNumber: string,
     actorId: string,
     from: Ticket['status'][],
-    changes: Parameters<TicketStore['update']>[2],
+    changes: TicketChanges,
     update: (ticket: Ticket) => Message,
   ): Promise<ActionOutcome> {
-    if (actorId !== agentId) return 'not-agent';
-    const updated = await store.update(ticketNumber, from, changes);
-    if (!updated) {
+    const ticket = await findTicket(ticketNumber);
+    if (!ticket) return 'not-found';
+    if (actorId !== ticket.agentId) return 'not-agent';
+    const stored = await store.update(ticketNumber, from, changes);
+    if (!stored) {
       // Already moved on (e.g. a double click): make sure the card reflects reality.
-      const current = await store.get(ticketNumber);
+      const current = await findTicket(ticketNumber);
       if (!current) return 'not-found';
       await refreshCard(current);
       return 'stale';
     }
+    const updated = withAgent(stored);
     await refreshCard(updated);
     await post(updated.confirmation.channel, update(updated), updated.confirmation.ts);
     return 'done';
@@ -63,12 +77,13 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
       const details: TicketDetails = {
         ...draft,
         number: await store.nextNumber(),
+        agentId,
         status: 'Open',
         createdAt: now().toISOString(),
       };
       // Post to the Agent first: a misconfigured Agent fails before the Requester is told anything.
-      const card = await post(agentId, ticketCard(details));
-      const confirmationRef = await post(draft.requesterId, confirmation(details, agentId));
+      const card = await post(details.agentId, ticketCard(details));
+      const confirmationRef = await post(draft.requesterId, confirmation(details));
       const ticket: Ticket = { ...details, card, confirmation: confirmationRef };
       await store.create(ticket);
       return ticket;
@@ -76,7 +91,12 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
 
     /** Posts the Ticket in #general. Kept apart from `open` so a failure here can't undo an opened Ticket. */
     async announce(ticket: Ticket): Promise<void> {
-      await post(GENERAL_CHANNEL, announcement(ticket, agentId));
+      await post(GENERAL_CHANNEL, announcement(ticket));
+    },
+
+    /** Whether `userId` is the Agent of an existing Ticket, and so may act on it. */
+    async isAgentOf(ticketNumber: string, userId: string): Promise<boolean> {
+      return (await findTicket(ticketNumber))?.agentId === userId;
     },
 
     take(ticketNumber: string, actorId: string): Promise<ActionOutcome> {
@@ -85,7 +105,7 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
         actorId,
         ['Open'],
         { status: 'In progress', takenAt: now().toISOString() },
-        (ticket) => takenUpdate(ticket, agentId),
+        takenUpdate,
       );
     },
 
@@ -95,7 +115,7 @@ export function createHelpdesk({ store, chat, agentId, now }: HelpdeskDeps) {
         actorId,
         ['Open', 'In progress'],
         { status: 'Resolved', resolvedAt: now().toISOString(), resolutionNote: note },
-        (ticket) => resolvedUpdate(ticket, agentId),
+        resolvedUpdate,
       );
     },
   };

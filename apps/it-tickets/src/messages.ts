@@ -61,11 +61,13 @@ export function ticketCard(ticket: TicketDetails): Message {
 }
 
 /** What the Requester receives when their Ticket is opened; later updates thread under it. */
-export function confirmation(ticket: TicketDetails, agentId: string): Message {
+export function confirmation(ticket: TicketDetails): Message {
   return {
-    text: `Your ticket ${ticket.number} has been opened, <@${agentId}> will be in touch: ${ticket.title}`,
+    text: `Your ticket ${ticket.number} has been opened, <@${ticket.agentId}> will be in touch: ${ticket.title}`,
     blocks: [
-      section(`✅ Your ticket *${ticket.number}* has been opened. <@${agentId}> will be in touch.`),
+      section(
+        `✅ Your ticket *${ticket.number}* has been opened. <@${ticket.agentId}> will be in touch.`,
+      ),
       section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
       detailFields(ticket, { includeStatus: false }),
       context('Updates on this ticket will appear in this thread.'),
@@ -74,12 +76,12 @@ export function confirmation(ticket: TicketDetails, agentId: string): Message {
 }
 
 /** The public post in #general for a Ticket whose Requester asked for one. */
-export function announcement(ticket: TicketDetails, agentId: string): Message {
+export function announcement(ticket: TicketDetails): Message {
   return {
-    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${agentId}>: ${ticket.title}`,
+    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${ticket.agentId}>: ${ticket.title}`,
     blocks: [
       section(
-        `📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}* · handled by <@${agentId}>`,
+        `📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}* · handled by <@${ticket.agentId}>`,
       ),
       section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
       detailFields(ticket, { includeStatus: false }),
@@ -87,13 +89,13 @@ export function announcement(ticket: TicketDetails, agentId: string): Message {
   };
 }
 
-export function takenUpdate(ticket: TicketDetails, agentId: string): Message {
-  const text = `🛠️ <@${agentId}> has taken *${ticket.number}* and is working on it.`;
+export function takenUpdate(ticket: TicketDetails): Message {
+  const text = `🛠️ <@${ticket.agentId}> has taken *${ticket.number}* and is working on it.`;
   return { text, blocks: [section(text)] };
 }
 
-export function resolvedUpdate(ticket: TicketDetails, agentId: string): Message {
-  const text = `✅ *${ticket.number}* has been resolved by <@${agentId}>.`;
+export function resolvedUpdate(ticket: TicketDetails): Message {
+  const text = `✅ *${ticket.number}* has been resolved by <@${ticket.agentId}>.`;
   const blocks = [section(text)];
   if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
   return { text, blocks };

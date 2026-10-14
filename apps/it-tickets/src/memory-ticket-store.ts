@@ -1,10 +1,10 @@
 import { formatTicketNumber, type Status, type Ticket } from './ticket.js';
-import type { TicketChanges, TicketStore } from './ticket-store.js';
+import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
 
 /** In-memory TicketStore for tests. */
 export class MemoryTicketStore implements TicketStore {
   private seq = 0;
-  readonly tickets = new Map<string, Ticket>();
+  readonly tickets = new Map<string, StoredTicket>();
 
   async nextNumber(): Promise<string> {
     return formatTicketNumber(++this.seq);
@@ -15,7 +15,7 @@ export class MemoryTicketStore implements TicketStore {
     this.tickets.set(ticket.number, structuredClone(ticket));
   }
 
-  async get(number: string): Promise<Ticket | undefined> {
+  async get(number: string): Promise<StoredTicket | undefined> {
     const ticket = this.tickets.get(number);
     return ticket && structuredClone(ticket);
   }
@@ -24,7 +24,7 @@ export class MemoryTicketStore implements TicketStore {
     number: string,
     from: Status[],
     changes: TicketChanges,
-  ): Promise<Ticket | undefined> {
+  ): Promise<StoredTicket | undefined> {
     const ticket = this.tickets.get(number);
     if (!ticket || !from.includes(ticket.status)) return undefined;
     Object.assign(ticket, changes);
