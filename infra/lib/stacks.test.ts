@@ -59,6 +59,29 @@ describe('GithubOidcStack', () => {
     });
   });
 
+  it("trusts GitHub's immutable subject when given its prefix", () => {
+    const immutable = Template.fromStack(
+      new GithubOidcStack(newApp(), 'Immutable', {
+        env,
+        githubRepo: 'me/repo',
+        subjectPrefix: 'repo:me@1/repo@2',
+      }),
+    );
+    immutable.hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Condition: {
+              StringEquals: Match.objectLike({
+                'token.actions.githubusercontent.com:sub': 'repo:me@1/repo@2:ref:refs/heads/main',
+              }),
+            },
+          }),
+        ],
+      },
+    });
+  });
+
   it('never deletes the GitHub OIDC provider it creates', () => {
     template.hasResource('AWS::IAM::OIDCProvider', { DeletionPolicy: 'Retain' });
   });

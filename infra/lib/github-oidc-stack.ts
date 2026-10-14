@@ -7,6 +7,12 @@ export const DEPLOY_ROLE_NAME = 'slack-bots-github-deploy';
 export interface GithubOidcStackProps extends StackProps {
   /** `owner/name` of the GitHub repository allowed to deploy. */
   githubRepo: string;
+  /**
+   * The repository part of GitHub's OIDC `sub` claim. Defaults to `repo:<owner>/<name>`, but repos
+   * using immutable subjects get `repo:<owner>@<owner id>/<name>@<repo id>`. GitHub reports the
+   * actual value at `GET /repos/{owner}/{repo}/actions/oidc/customization/sub` (`sub_claim_prefix`).
+   */
+  subjectPrefix?: string;
   /** ARN of an existing GitHub OIDC provider; one is created when omitted (AWS allows one per account). */
   existingProviderArn?: string;
 }
@@ -31,13 +37,14 @@ export class GithubOidcStack extends Stack {
       providerArn = provider.oidcProviderArn;
     }
 
+    const subjectPrefix = props.subjectPrefix ?? `repo:${props.githubRepo}`;
     const role = new iam.Role(this, 'DeployRole', {
       roleName: DEPLOY_ROLE_NAME,
       description: `GitHub Actions deploys from ${props.githubRepo}@main`,
       assumedBy: new iam.WebIdentityPrincipal(providerArn, {
         StringEquals: {
           'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
-          'token.actions.githubusercontent.com:sub': `repo:${props.githubRepo}:ref:refs/heads/main`,
+          'token.actions.githubusercontent.com:sub': `${subjectPrefix}:ref:refs/heads/main`,
         },
       }),
     });
