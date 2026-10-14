@@ -260,9 +260,15 @@ ask AWS_REGION "AWS region:"
 write_env AWS_REGION "$AWS_REGION"
 OIDC_ARN=$(aws iam list-open-id-connect-providers --output text \
   --query "OpenIDConnectProviderList[?contains(Arn, 'token.actions.githubusercontent.com')].Arn" 2>/dev/null || true)
-if [[ -n "$OIDC_ARN" && "$OIDC_ARN" != "None" ]]; then
+# A provider our own SlackBots-GithubOidc stack created is not "existing": importing it
+# would make CloudFormation delete it on the next deploy.
+OWNED_ARN=$(aws cloudformation describe-stack-resources --stack-name SlackBots-GithubOidc --region "$AWS_REGION" \
+  --query "StackResources[?ResourceType=='AWS::IAM::OIDCProvider'].PhysicalResourceId" --output text 2>/dev/null || true)
+if [[ -n "$OIDC_ARN" && "$OIDC_ARN" != "None" && "$OIDC_ARN" != "$OWNED_ARN" ]]; then
   note "This account already has a GitHub OIDC provider; reusing it."
   write_env GITHUB_OIDC_PROVIDER_ARN "$OIDC_ARN"
+elif [[ -n "$(_existing GITHUB_OIDC_PROVIDER_ARN || true)" ]]; then
+  write_env GITHUB_OIDC_PROVIDER_ARN ""   # empty = let the stack own the provider
 fi
 pause
 
@@ -287,6 +293,13 @@ stage "CDK bootstrap + GitHub deploy role"
 say "Creates CDK's bootstrap resources in $AWS_REGION, then the role GitHub Actions"
 say "deploys with (only from main of this repo). This is the only stack you ever"
 say "deploy by hand. CDK shows the IAM changes and asks you to approve them."
+# New repos use GitHub's immutable OIDC subject (repo:owner@id/name@id); the role must trust
+# exactly what GitHub will put in the token.
+SUB_PREFIX=$(gh api "repos/{owner}/{repo}/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null || true)
+if [[ -n "$SUB_PREFIX" ]]; then
+  note "GitHub signs deploys from this repo as: $SUB_PREFIX"
+  write_env GITHUB_OIDC_SUB_PREFIX "$SUB_PREFIX"
+fi
 if confirm "Run cdk bootstrap and deploy SlackBots-GithubOidc now?"; then
   ( cd infra \
     && npx cdk bootstrap "aws://$AWS_ACCOUNT_ID/$AWS_REGION" \

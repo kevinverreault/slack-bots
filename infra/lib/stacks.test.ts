@@ -59,6 +59,45 @@ describe('GithubOidcStack', () => {
     });
   });
 
+  it("trusts GitHub's immutable subject when given its prefix", () => {
+    const immutable = Template.fromStack(
+      new GithubOidcStack(newApp(), 'Immutable', {
+        env,
+        githubRepo: 'me/repo',
+        subjectPrefix: 'repo:me@1/repo@2',
+      }),
+    );
+    immutable.hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Condition: {
+              StringEquals: Match.objectLike({
+                'token.actions.githubusercontent.com:sub': 'repo:me@1/repo@2:ref:refs/heads/main',
+              }),
+            },
+          }),
+        ],
+      },
+    });
+  });
+
+  it('never deletes the GitHub OIDC provider it creates', () => {
+    template.hasResource('AWS::IAM::OIDCProvider', { DeletionPolicy: 'Retain' });
+  });
+
+  it('creates no provider when reusing an existing one', () => {
+    const reusing = Template.fromStack(
+      new GithubOidcStack(newApp(), 'Reuse', {
+        env,
+        githubRepo: 'me/repo',
+        existingProviderArn:
+          'arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com',
+      }),
+    );
+    reusing.resourceCountIs('AWS::IAM::OIDCProvider', 0);
+  });
+
   it('can only assume the CDK bootstrap roles', () => {
     const policies = Object.values(template.findResources('AWS::IAM::Policy'));
     expect(policies).toHaveLength(1);

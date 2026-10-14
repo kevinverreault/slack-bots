@@ -25,6 +25,7 @@ new GithubOidcStack(app, 'SlackBots-GithubOidc', {
   env,
   tags,
   githubRepo: process.env.GITHUB_REPO ?? 'kevinverreault/slack-bots',
+  subjectPrefix: process.env.GITHUB_OIDC_SUB_PREFIX || undefined,
   existingProviderArn: process.env.GITHUB_OIDC_PROVIDER_ARN || undefined,
 });
 
