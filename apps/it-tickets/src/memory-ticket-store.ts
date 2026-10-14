@@ -1,4 +1,4 @@
-import { formatTicketNumber, type Status, type Ticket } from './ticket.js';
+import { formatTicketNumber, type MessageRef, type Status, type Ticket } from './ticket.js';
 import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
 
 /** In-memory TicketStore for tests. */
@@ -29,5 +29,11 @@ export class MemoryTicketStore implements TicketStore {
     if (!ticket || !from.includes(ticket.status)) return undefined;
     Object.assign(ticket, changes);
     return structuredClone(ticket);
+  }
+
+  async recordAnnouncement(number: string, announcement: MessageRef): Promise<void> {
+    const ticket = this.tickets.get(number);
+    if (!ticket) throw new Error(`${number} does not exist`);
+    ticket.announcement = structuredClone(announcement);
   }
 }

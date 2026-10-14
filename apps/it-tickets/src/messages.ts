@@ -101,6 +101,14 @@ export function resolvedUpdate(ticket: TicketDetails): Message {
   return { text, blocks };
 }
 
+/** Posted in a Ticket's Announcement thread when its Agent Resolves it and asks for one. */
+export function announcementFollowUp(ticket: TicketDetails): Message {
+  const text = `✅ <@${ticket.agentId}> resolved IT ticket *${ticket.number}*.`;
+  const blocks = [section(text)];
+  if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
+  return { text, blocks };
+}
+
 export function openFailed(): Message {
   const text =
     '⚠️ Sorry, something went wrong and your ticket could not be opened. Please try again in a moment.';

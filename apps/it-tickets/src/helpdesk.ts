@@ -1,6 +1,7 @@
 import type { WebClient } from '@slack/web-api';
 import {
   announcement,
+  announcementFollowUp,
   confirmation,
   resolvedUpdate,
   takenUpdate,
@@ -19,6 +20,7 @@ export interface HelpdeskDeps {
   /** The Agent assumed for stored Tickets opened before Agents were recorded. */
   legacyAgentId: string;
   now: () => Date;
+  logger: { warn(...msg: unknown[]): void };
 }
 
 /** Where Announcements go. Slack accepts a channel name here; `chat:write.public` lets the bot post without joining. */
@@ -26,8 +28,15 @@ export const GENERAL_CHANNEL = '#general';
 
 export type ActionOutcome = 'done' | 'not-agent' | 'not-found' | 'stale';
 
+export interface Resolution {
+  /** The Resolution note for the Requester. */
+  note?: string;
+  /** Also post an Announcement follow-up, if the Ticket has an Announcement. */
+  postFollowUp?: boolean;
+}
+
 /** The Ticket lifecycle: open, Take, Resolve, and the Slack messages each step produces. */
-export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps) {
+export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: HelpdeskDeps) {
   async function post(channel: string, message: Message, threadTs?: string): Promise<MessageRef> {
     const res = await chat.postMessage({ channel, ...message, thread_ts: threadTs });
     if (!res.channel || !res.ts) throw new Error(`chat.postMessage to ${channel} returned no ts`);
@@ -54,6 +63,7 @@ export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps
     from: Ticket['status'][],
     changes: TicketChanges,
     update: (ticket: Ticket) => Message,
+    afterwards?: (ticket: Ticket) => Promise<void>,
   ): Promise<ActionOutcome> {
     const ticket = await findTicket(ticketNumber);
     if (!ticket) return 'not-found';
@@ -69,6 +79,7 @@ export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps
     const updated = withAgent(stored);
     await refreshCard(updated);
     await post(updated.confirmation.channel, update(updated), updated.confirmation.ts);
+    await afterwards?.(updated);
     return 'done';
   }
 
@@ -88,14 +99,23 @@ export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps
       return ticket;
     },
 
-    /** Posts the Ticket in #general. Kept apart from `open` so a failure here can't undo an opened Ticket. */
+    /**
+     * Posts the Ticket in #general and records where. Kept apart from `open` so a failure here
+     * can't undo an opened Ticket. Failing to record only costs later replies in its thread.
+     */
     async announce(ticket: Ticket): Promise<void> {
-      await post(GENERAL_CHANNEL, announcement(ticket));
+      const posted = await post(GENERAL_CHANNEL, announcement(ticket));
+      try {
+        await store.recordAnnouncement(ticket.number, posted);
+      } catch (err) {
+        logger.warn(`Announced ${ticket.number} but could not record its Announcement`, err);
+      }
     },
 
-    /** Whether `userId` is the Agent of an existing Ticket, and so may act on it. */
-    async isAgentOf(ticketNumber: string, userId: string): Promise<boolean> {
-      return (await findTicket(ticketNumber))?.agentId === userId;
+    /** The Ticket, if it exists and `userId` is its Agent, and so may act on it. */
+    async ticketForAgent(ticketNumber: string, userId: string): Promise<Ticket | undefined> {
+      const ticket = await findTicket(ticketNumber);
+      return ticket?.agentId === userId ? ticket : undefined;
     },
 
     take(ticketNumber: string, actorId: string): Promise<ActionOutcome> {
@@ -108,13 +128,27 @@ export function createHelpdesk({ store, chat, legacyAgentId, now }: HelpdeskDeps
       );
     },
 
-    resolve(ticketNumber: string, actorId: string, note?: string): Promise<ActionOutcome> {
+    resolve(
+      ticketNumber: string,
+      actorId: string,
+      { note, postFollowUp = false }: Resolution = {},
+    ): Promise<ActionOutcome> {
       return transition(
         ticketNumber,
         actorId,
         ['Open', 'In progress'],
         { status: 'Resolved', resolvedAt: now().toISOString(), resolutionNote: note },
         resolvedUpdate,
+        async (resolved) => {
+          if (!postFollowUp || !resolved.announcement) return;
+          const { channel, ts } = resolved.announcement;
+          try {
+            await post(channel, announcementFollowUp(resolved), ts);
+          } catch (err) {
+            // The Ticket is Resolved and both sides know; a missing follow-up isn't worth alarming anyone.
+            logger.warn(`Failed to post the Announcement follow-up for ${resolved.number}`, err);
+          }
+        },
       );
     },
   };

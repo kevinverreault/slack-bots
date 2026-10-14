@@ -5,7 +5,7 @@ import {
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { formatTicketNumber, type Status, type Ticket } from './ticket.js';
+import { formatTicketNumber, type MessageRef, type Status, type Ticket } from './ticket.js';
 
 /** A Ticket as read back from storage. Tickets opened before Agents were recorded have no `agentId`. */
 export type StoredTicket = Omit<Ticket, 'agentId'> & Partial<Pick<Ticket, 'agentId'>>;
@@ -24,6 +24,8 @@ export interface TicketStore {
    * Returns the updated Ticket, or undefined if it does not exist or its status didn't match.
    */
   update(number: string, from: Status[], changes: TicketChanges): Promise<StoredTicket | undefined>;
+  /** Records where the Ticket's Announcement was posted, whatever its Status. Throws if it does not exist. */
+  recordAnnouncement(number: string, announcement: MessageRef): Promise<void>;
 }
 
 const COUNTER_KEY = 'COUNTER#ticket';
@@ -104,6 +106,19 @@ export class DynamoTicketStore implements TicketStore {
       if (err instanceof ConditionalCheckFailedException) return undefined;
       throw err;
     }
+  }
+
+  async recordAnnouncement(number: string, announcement: MessageRef): Promise<void> {
+    await this.db.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { pk: ticketKey(number) },
+        UpdateExpression: 'SET #announcement = :announcement',
+        ConditionExpression: 'attribute_exists(pk)',
+        ExpressionAttributeNames: { '#announcement': 'announcement' },
+        ExpressionAttributeValues: { ':announcement': announcement },
+      }),
+    );
   }
 }
 
