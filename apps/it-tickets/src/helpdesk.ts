@@ -140,8 +140,15 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
         { status: 'Resolved', resolvedAt: now().toISOString(), resolutionNote: note },
         resolvedUpdate,
         async (resolved) => {
-          if (!postFollowUp || !resolved.announcement) return;
+          if (!resolved.announcement) return;
           const { channel, ts } = resolved.announcement;
+          try {
+            await chat.update({ channel, ts, ...announcement(resolved) });
+          } catch (err) {
+            // As with the follow-up: the Ticket is Resolved and both sides know.
+            logger.warn(`Failed to mark the Announcement of ${resolved.number} Resolved`, err);
+          }
+          if (!postFollowUp) return;
           try {
             await post(channel, announcementFollowUp(resolved), ts);
           } catch (err) {

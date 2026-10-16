@@ -1,6 +1,6 @@
 import type { ViewOutput } from '@slack/bolt';
 import { describe, expect, it } from 'vitest';
-import { formatTicketNumber } from './ticket.js';
+import { formatLeadTime, formatTicketNumber } from './ticket.js';
 import {
   messagePermalink,
   parseResolveSubmission,
@@ -224,6 +224,21 @@ describe('helpers', () => {
   it('formats Ticket numbers', () => {
     expect(formatTicketNumber(42)).toBe('IT-0042');
     expect(formatTicketNumber(12345)).toBe('IT-12345');
+  });
+
+  it('formats a lead time under an hour in minutes', () => {
+    expect(formatLeadTime('2026-10-14T12:00:00Z', '2026-10-14T12:45:30Z')).toBe('45m');
+  });
+
+  it('formats a lead time under a minute as such', () => {
+    expect(formatLeadTime('2026-10-14T12:00:00Z', '2026-10-14T12:00:40Z')).toBe('under 1m');
+  });
+
+  it('formats a longer lead time in its two largest units, dropping a zero one', () => {
+    expect(formatLeadTime('2026-10-14T12:00:00Z', '2026-10-14T15:20:00Z')).toBe('3h 20m');
+    expect(formatLeadTime('2026-10-14T12:00:00Z', '2026-10-14T14:00:59Z')).toBe('2h');
+    expect(formatLeadTime('2026-10-12T09:00:00Z', '2026-10-14T12:45:00Z')).toBe('2d 3h');
+    expect(formatLeadTime('2026-10-09T12:00:00Z', '2026-10-14T12:30:00Z')).toBe('5d');
   });
 
   it('builds message permalinks', () => {

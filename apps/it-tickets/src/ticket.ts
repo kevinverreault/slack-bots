@@ -43,6 +43,23 @@ export function formatTicketNumber(sequence: number): string {
   return `IT-${String(sequence).padStart(4, '0')}`;
 }
 
+/** How long a Ticket was open, in its two largest units, such as `2d 3h`, `3h 20m` or `45m`. */
+export function formatLeadTime(openedAt: string, resolvedAt: string): string {
+  const totalMinutes = Math.floor((Date.parse(resolvedAt) - Date.parse(openedAt)) / 60_000);
+  const parts: [number, string][] = [
+    [Math.floor(totalMinutes / 1440), 'd'],
+    [Math.floor(totalMinutes / 60) % 24, 'h'],
+    [totalMinutes % 60, 'm'],
+  ];
+  const largest = parts.findIndex(([amount]) => amount > 0);
+  if (largest === -1) return 'under 1m';
+  return parts
+    .slice(largest, largest + 2)
+    .filter(([amount]) => amount > 0)
+    .map(([amount, unit]) => `${amount}${unit}`)
+    .join(' ');
+}
+
 export function canTake(status: Status): boolean {
   return status === 'Open';
 }

@@ -45,12 +45,16 @@ The private message a Ticket's Agent receives for it. It shows the Ticket's deta
 _Avoid_: Notification, alert
 
 **Announcement**:
-An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is never edited afterwards, but may get an Announcement follow-up in its thread.
+An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is edited once, when the Ticket is Resolved, to show when it was Resolved and its Lead time, but never the Resolution note. It may also get an Announcement follow-up in its thread.
 _Avoid_: Broadcast, share
 
 **Announcement follow-up**:
 An optional threaded reply under a Ticket's Announcement, posted when the Agent Resolves it and asks for one. It names the Agent and the Requester, says the Agent resolved the Requester's Ticket, and includes the Resolution note, if any.
 _Avoid_: Resolution reply, update
+
+**Lead time**:
+How long a Ticket was open: from when it was opened to when it was Resolved.
+_Avoid_: Duration, time to resolve, age
 
 **Category**:
 The kind of IT problem a Ticket concerns: Hardware, Software, Access, Network or Other.

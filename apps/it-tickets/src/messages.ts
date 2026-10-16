@@ -1,5 +1,5 @@
 import type { KnownBlock } from '@slack/types';
-import { canResolve, canTake, type Ticket } from './ticket.js';
+import { canResolve, canTake, formatLeadTime, type Ticket } from './ticket.js';
 
 export const TAKE_ACTION = 'ticket_take';
 export const RESOLVE_ACTION = 'ticket_resolve';
@@ -75,18 +75,29 @@ export function confirmation(ticket: TicketDetails): Message {
   };
 }
 
-/** The public post in #general for a Ticket whose Requester asked for one. */
+/**
+ * The public post in #general for a Ticket whose Requester asked for one. Once the Ticket is
+ * Resolved it also says when and how long it was open, but never shows the Resolution note.
+ */
 export function announcement(ticket: TicketDetails): Message {
-  return {
-    text: `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${ticket.agentId}>: ${ticket.title}`,
-    blocks: [
-      section(
-        `📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}* · handled by <@${ticket.agentId}>`,
+  let text = `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${ticket.agentId}>: ${ticket.title}`;
+  const blocks: KnownBlock[] = [
+    section(
+      `📣 <@${ticket.requesterId}> opened IT ticket *${ticket.number}* · handled by <@${ticket.agentId}>`,
+    ),
+    section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
+    detailFields(ticket, { includeStatus: false }),
+  ];
+  if (ticket.status === 'Resolved' && ticket.resolvedAt) {
+    const leadTime = formatLeadTime(ticket.createdAt, ticket.resolvedAt);
+    text += ` (${STATUS_EMOJI.Resolved} Resolved, open for ${leadTime})`;
+    blocks.push(
+      context(
+        `${STATUS_EMOJI.Resolved} *Resolved* ${slackDate(ticket.resolvedAt)} · open for ${leadTime}`,
       ),
-      section(`*${escape(ticket.title)}*\n${quote(ticket.description)}`),
-      detailFields(ticket, { includeStatus: false }),
-    ],
-  };
+    );
+  }
+  return { text, blocks };
 }
 
 export function takenUpdate(ticket: TicketDetails): Message {
@@ -116,14 +127,19 @@ export function openFailed(): Message {
 }
 
 function detailFields(ticket: TicketDetails, { includeStatus = true } = {}): KnownBlock {
-  const opened = Math.floor(Date.parse(ticket.createdAt) / 1000);
   const fields = [
     `*Category*\n${ticket.category}`,
     `*Urgency*\n${URGENCY_EMOJI[ticket.urgency]} ${ticket.urgency}`,
-    `*Opened*\n<!date^${opened}^{date_short_pretty} {time}|${ticket.createdAt}>`,
+    `*Opened*\n${slackDate(ticket.createdAt)}`,
   ];
   if (includeStatus) fields.unshift(`*Status*\n${STATUS_EMOJI[ticket.status]} ${ticket.status}`);
   return { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) };
+}
+
+/** An ISO timestamp that Slack shows in each reader's own timezone. */
+function slackDate(iso: string): string {
+  const seconds = Math.floor(Date.parse(iso) / 1000);
+  return `<!date^${seconds}^{date_short_pretty} {time}|${iso}>`;
 }
 
 function header(text: string): KnownBlock {
