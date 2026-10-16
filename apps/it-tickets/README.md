@@ -11,10 +11,10 @@ This bot mimics a typical IT helpdesk Slack bot. Instead of feeding a ticketing 
    - The Requester receives a **Confirmation**. Updates arrive as replies in its thread.
    - If the Requester ticked the box, an **Announcement** is posted in #general.
 4. **Take** moves the Ticket from Open to In progress.
-5. **Resolve** moves it from Open or In progress to Resolved, with an optional **Resolution note** for the Requester. If the Ticket has an Announcement, the Agent can tick a box to also post an **Announcement follow-up** in its thread, with the Resolution note if there is one.
+5. **Resolve** moves it from Open or In progress to Resolved, with an optional **Resolution note** for the Requester. If the Ticket has an Announcement, it is edited to show that the Ticket was Resolved, when, and how long it was open (but not the Resolution note). The Agent can also tick a box to post an **Announcement follow-up** in its thread, with the Resolution note if there is one.
 6. The Ticket card updates in place and its buttons disappear once there's nothing left to do. Statuses never move backwards.
 
-Everything happens in DMs with the bot. The only channel posts are the opt-in Announcement in #general, which isn't edited as the Ticket's Status changes, and the Agent's opt-in Announcement follow-up in its thread.
+Everything happens in DMs with the bot. The only channel posts are the opt-in Announcement in #general, which is edited only once, when the Ticket is Resolved, and the Agent's opt-in Announcement follow-up in its thread.
 
 ## Code map
 

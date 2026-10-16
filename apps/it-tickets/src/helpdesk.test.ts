@@ -41,6 +41,8 @@ describe('helpdesk', () => {
   let store: MemoryTicketStore;
   let calls: Call[];
   let warnings: unknown[][];
+  /** What the helpdesk takes to be the current time. */
+  let clock: Date;
   let helpdesk: ReturnType<typeof createHelpdesk>;
   /** Opens a Ticket for the Agent the Requester chose. */
   let openedFor: (agentId: string) => Promise<Ticket>;
@@ -50,7 +52,7 @@ describe('helpdesk', () => {
       store,
       chat,
       legacyAgentId: AGENT,
-      now: () => new Date('2026-10-14T12:00:00Z'),
+      now: () => clock,
       logger: { warn: (...msg) => warnings.push(msg) },
     });
 
@@ -59,9 +61,21 @@ describe('helpdesk', () => {
     const fake = fakeChat();
     calls = fake.calls;
     warnings = [];
+    clock = new Date('2026-10-14T12:00:00Z');
     helpdesk = withChat(fake.chat);
     openedFor = (agentId) => helpdesk.open({ ...draft, agentId });
   });
+
+  /** Opens and announces a Ticket, so it has an Announcement at `D#general` / `100.3`. */
+  async function announced(): Promise<Ticket> {
+    const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
+    await helpdesk.announce(ticket);
+    calls.length = 0;
+    return ticket;
+  }
+  /** The chat calls of one kind made to #general. */
+  const generalCalls = (method: Call['method']) =>
+    calls.filter((c) => c.method === method && c.args.channel === 'D#general');
 
   describe('open', () => {
     it('numbers the Ticket, sends a Ticket card to the Agent and a Confirmation to the Requester', async () => {
@@ -196,6 +210,14 @@ describe('helpdesk', () => {
   });
 
   describe('take', () => {
+    it('leaves the Announcement in #general as it is', async () => {
+      const ticket = await announced();
+
+      expect(await helpdesk.take(ticket.number, AGENT)).toBe('done');
+
+      expect(calls.filter((c) => c.args.channel === 'D#general')).toEqual([]);
+    });
+
     it('moves an Open Ticket to In progress, updates the card and tells the Requester in the thread', async () => {
       const ticket = await helpdesk.open(draft);
       calls.length = 0;
@@ -300,14 +322,7 @@ describe('helpdesk', () => {
   });
 
   describe('resolve with an Announcement follow-up', () => {
-    /** Opens and announces a Ticket, so it has an Announcement at `D#general` / `100.3`. */
-    async function announced(): Promise<Ticket> {
-      const ticket = await helpdesk.open({ ...draft, postToGeneral: true });
-      await helpdesk.announce(ticket);
-      calls.length = 0;
-      return ticket;
-    }
-    const generalPosts = () => calls.filter((c) => c.args.channel === 'D#general');
+    const generalPosts = () => generalCalls('postMessage');
 
     it("posts it in the Announcement's thread, naming the Agent, Requester and Ticket, with the Resolution note", async () => {
       const ticket = await announced();
@@ -340,6 +355,7 @@ describe('helpdesk', () => {
       expect(calls.map((c) => [c.method, c.args.channel])).toEqual([
         ['update', ticket.card.channel],
         ['postMessage', ticket.confirmation.channel],
+        ['update', 'D#general'],
         ['postMessage', 'D#general'],
       ]);
     });
@@ -383,9 +399,64 @@ describe('helpdesk', () => {
       expect(await flaky.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
 
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
-      expect(fake.calls.map((c) => c.args.channel)).toEqual([
-        ticket.card.channel,
-        ticket.confirmation.channel,
+      expect(fake.calls.map((c) => [c.method, c.args.channel])).toEqual([
+        ['update', ticket.card.channel],
+        ['postMessage', ticket.confirmation.channel],
+        ['update', 'D#general'],
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0]![0])).toContain(ticket.number);
+    });
+  });
+
+  describe('resolve an announced Ticket', () => {
+    const announcementEdits = () => generalCalls('update');
+
+    it('edits the Announcement to show it Resolved, when, and how long it was open', async () => {
+      const ticket = await announced();
+      clock = new Date('2026-10-14T15:20:00Z');
+
+      await helpdesk.resolve(ticket.number, AGENT, { note: 'Restarted the VPN gateway' });
+
+      const [edit] = announcementEdits();
+      expect(edit!.args.ts).toBe('100.3');
+      const blocksJson = JSON.stringify(edit!.args.blocks);
+      expect(blocksJson).toContain('VPN is down');
+      expect(blocksJson).toContain(`handled by <@${AGENT}>`);
+      expect(blocksJson).toContain('Resolved');
+      expect(blocksJson).toContain(`<!date^${Date.parse('2026-10-14T15:20:00Z') / 1000}^`);
+      expect(blocksJson).toContain('3h 20m');
+      expect(edit!.args.text).toContain('Resolved');
+      expect(edit!.args.text).toContain('3h 20m');
+      expect(JSON.stringify(edit!.args)).not.toContain('Restarted the VPN gateway');
+    });
+
+    it('never edits it again for a double Resolve', async () => {
+      const ticket = await announced();
+
+      await helpdesk.resolve(ticket.number, AGENT);
+      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('stale');
+
+      expect(announcementEdits()).toHaveLength(1);
+    });
+
+    it('only warns if the edit fails, still posting the follow-up and leaving everyone else updated', async () => {
+      const ticket = await announced();
+      const fake = fakeChat();
+      const update = fake.chat.update;
+      fake.chat.update = (async (args: { channel: string }) => {
+        if (args.channel === 'D#general') throw new Error('message_not_found');
+        return update(args as never);
+      }) as Chat['update'];
+      const flaky = withChat(fake.chat);
+
+      expect(await flaky.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+
+      expect((await store.get(ticket.number))?.status).toBe('Resolved');
+      expect(fake.calls.map((c) => [c.method, c.args.channel])).toEqual([
+        ['update', ticket.card.channel],
+        ['postMessage', ticket.confirmation.channel],
+        ['postMessage', 'D#general'],
       ]);
       expect(warnings).toHaveLength(1);
       expect(String(warnings[0]![0])).toContain(ticket.number);
