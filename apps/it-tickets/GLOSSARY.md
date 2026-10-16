@@ -49,7 +49,7 @@ An optional post of a newly opened Ticket in #general, made when the Requester a
 _Avoid_: Broadcast, share
 
 **Announcement follow-up**:
-An optional threaded reply under a Ticket's Announcement, posted when the Agent Resolves it and asks for one. It says the Agent resolved the Ticket and includes the Resolution note, if any.
+An optional threaded reply under a Ticket's Announcement, posted when the Agent Resolves it and asks for one. It names the Agent and the Requester, says the Agent resolved the Requester's Ticket, and includes the Resolution note, if any.
 _Avoid_: Resolution reply, update
 
 **Category**:

@@ -103,7 +103,7 @@ export function resolvedUpdate(ticket: TicketDetails): Message {
 
 /** Posted in a Ticket's Announcement thread when its Agent Resolves it and asks for one. */
 export function announcementFollowUp(ticket: TicketDetails): Message {
-  const text = `✅ <@${ticket.agentId}> resolved IT ticket *${ticket.number}*.`;
+  const text = `✅ <@${ticket.agentId}> resolved <@${ticket.requesterId}>'s IT ticket *${ticket.number}*.`;
   const blocks = [section(text)];
   if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
   return { text, blocks };

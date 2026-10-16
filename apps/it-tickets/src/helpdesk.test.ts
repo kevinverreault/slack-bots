@@ -309,7 +309,7 @@ describe('helpdesk', () => {
     }
     const generalPosts = () => calls.filter((c) => c.args.channel === 'D#general');
 
-    it("posts it in the Announcement's thread, naming the Agent and Ticket, with the Resolution note", async () => {
+    it("posts it in the Announcement's thread, naming the Agent, Requester and Ticket, with the Resolution note", async () => {
       const ticket = await announced();
 
       expect(
@@ -323,8 +323,13 @@ describe('helpdesk', () => {
       expect(followUp).toMatchObject({ method: 'postMessage', args: { thread_ts: '100.3' } });
       expect(followUp!.args).not.toHaveProperty('reply_broadcast');
       expect(followUp!.args.text).toContain(`<@${AGENT}>`);
+      expect(followUp!.args.text).toContain(`<@${REQUESTER}>`);
       expect(followUp!.args.text).toContain(ticket.number);
-      expect(JSON.stringify(followUp!.args.blocks)).toContain('Restarted the VPN gateway');
+      const blocksJson = JSON.stringify(followUp!.args.blocks);
+      expect(blocksJson).toContain(`<@${AGENT}>`);
+      expect(blocksJson).toContain(`<@${REQUESTER}>`);
+      expect(blocksJson).toContain(ticket.number);
+      expect(blocksJson).toContain('Restarted the VPN gateway');
     });
 
     it('still updates the Ticket card and the Requester as usual', async () => {
