@@ -9,7 +9,7 @@ import {
   type Message,
   type TicketDetails,
 } from './messages.js';
-import type { MessageRef, Ticket, TicketDraft } from './ticket.js';
+import type { MessageRef, Resolution, Ticket, TicketDraft } from './ticket.js';
 import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
 
 export type Chat = Pick<WebClient['chat'], 'postMessage' | 'update'>;
@@ -28,7 +28,9 @@ export const GENERAL_CHANNEL = '#general';
 
 export type ActionOutcome = 'done' | 'not-agent' | 'not-found' | 'stale';
 
-export interface Resolution {
+/** What the Agent says when Resolving a Ticket. */
+export interface ResolveDetails {
+  resolution: Resolution;
   /** The Resolution note for the Requester. */
   note?: string;
   /** Also post an Announcement follow-up, if the Ticket has an Announcement. */
@@ -131,13 +133,13 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
     resolve(
       ticketNumber: string,
       actorId: string,
-      { note, postFollowUp = false }: Resolution = {},
+      { resolution, note, postFollowUp = false }: ResolveDetails,
     ): Promise<ActionOutcome> {
       return transition(
         ticketNumber,
         actorId,
         ['Open', 'In progress'],
-        { status: 'Resolved', resolvedAt: now().toISOString(), resolutionNote: note },
+        { status: 'Resolved', resolvedAt: now().toISOString(), resolution, resolutionNote: note },
         resolvedUpdate,
         async (resolved) => {
           if (!resolved.announcement) return;

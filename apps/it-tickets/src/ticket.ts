@@ -6,6 +6,9 @@ export type Urgency = (typeof URGENCIES)[number];
 
 export type Status = 'Open' | 'In progress' | 'Resolved';
 
+export const RESOLUTIONS = ['Fixed', 'Unable to reproduce', 'As designed', "Won't fix"] as const;
+export type Resolution = (typeof RESOLUTIONS)[number];
+
 /** A posted Slack message we may later update or reply to. */
 export interface MessageRef {
   channel: string;
@@ -32,6 +35,8 @@ export interface Ticket extends TicketDraft {
   createdAt: string;
   takenAt?: string;
   resolvedAt?: string;
+  /** How the Agent classified the Ticket's end. Tickets Resolved before Resolutions existed have none. */
+  resolution?: Resolution;
   resolutionNote?: string;
   confirmation: MessageRef;
   card: MessageRef;

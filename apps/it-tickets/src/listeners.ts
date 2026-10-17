@@ -102,9 +102,14 @@ export function registerListeners(
   });
 
   app.view(RESOLVE_TICKET_VIEW, async ({ ack, body, view, client, logger }) => {
+    const parsed = parseResolveSubmission(view);
+    if (!parsed.ok) {
+      await ack({ response_action: 'errors', errors: parsed.errors });
+      return;
+    }
     await ack();
-    const { ticketNumber, ...resolution } = parseResolveSubmission(view);
-    const outcome = await helpdesk(client.chat).resolve(ticketNumber, body.user.id, resolution);
+    const { ticketNumber, ...details } = parsed.value;
+    const outcome = await helpdesk(client.chat).resolve(ticketNumber, body.user.id, details);
     logOutcome(logger, 'resolve', ticketNumber, body.user.id, outcome);
   });
 }

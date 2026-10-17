@@ -11,7 +11,7 @@ import { formatTicketNumber, type MessageRef, type Status, type Ticket } from '.
 export type StoredTicket = Omit<Ticket, 'agentId'> & Partial<Pick<Ticket, 'agentId'>>;
 
 export type TicketChanges = Partial<
-  Pick<Ticket, 'status' | 'takenAt' | 'resolvedAt' | 'resolutionNote'>
+  Pick<Ticket, 'status' | 'takenAt' | 'resolvedAt' | 'resolution' | 'resolutionNote'>
 >;
 
 export interface TicketStore {

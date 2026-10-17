@@ -1,7 +1,16 @@
 import type { ViewOutput } from '@slack/bolt';
 import type { ModalView } from '@slack/types';
 import type { AgentChoice } from './agents.js';
-import { CATEGORIES, URGENCIES, type Category, type TicketDraft, type Urgency } from './ticket.js';
+import type { ResolveDetails } from './helpdesk.js';
+import {
+  CATEGORIES,
+  RESOLUTIONS,
+  URGENCIES,
+  type Category,
+  type Resolution,
+  type TicketDraft,
+  type Urgency,
+} from './ticket.js';
 
 export const OPEN_TICKET_VIEW = 'open_ticket';
 export const RESOLVE_TICKET_VIEW = 'resolve_ticket';
@@ -151,6 +160,17 @@ export function resolveModal(ticketNumber: string, { announced = false } = {}): 
   const blocks: ModalView['blocks'] = [
     {
       type: 'input',
+      block_id: 'resolution',
+      label: { type: 'plain_text', text: 'Resolution' },
+      element: {
+        type: 'static_select',
+        action_id: 'value',
+        placeholder: { type: 'plain_text', text: 'How did this ticket end?' },
+        options: RESOLUTIONS.map(option),
+      },
+    },
+    {
+      type: 'input',
       block_id: 'note',
       optional: true,
       label: { type: 'plain_text', text: 'Resolution note' },
@@ -181,18 +201,24 @@ export function resolveModal(ticketNumber: string, { announced = false } = {}): 
   };
 }
 
-export function parseResolveSubmission(view: ViewOutput): {
-  ticketNumber: string;
-  note?: string;
-  postFollowUp?: true;
-} {
+export type ResolveSubmission = { ticketNumber: string } & ResolveDetails;
+
+export function parseResolveSubmission(view: ViewOutput): ParseResult<ResolveSubmission> {
   const values = view.state.values;
+  const resolution = values.resolution?.value?.selected_option?.value as Resolution | undefined;
   const note = values.note?.value?.value?.trim();
   const postFollowUp = generalTicked(values);
+  if (!resolution || !RESOLUTIONS.includes(resolution)) {
+    return { ok: false, errors: { resolution: 'Please pick a resolution.' } };
+  }
   return {
-    ticketNumber: view.private_metadata,
-    ...(note ? { note } : {}),
-    ...(postFollowUp ? { postFollowUp } : {}),
+    ok: true,
+    value: {
+      ticketNumber: view.private_metadata,
+      resolution,
+      ...(note ? { note } : {}),
+      ...(postFollowUp ? { postFollowUp } : {}),
+    },
   };
 }
 
