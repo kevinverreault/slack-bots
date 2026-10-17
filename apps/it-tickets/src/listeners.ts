@@ -1,12 +1,16 @@
 import type { App, MessageShortcut } from '@slack/bolt';
+import type { ModalView } from '@slack/types';
 import type { WebClient } from '@slack/web-api';
-import { lookUpAgents } from './agents.js';
+import { lookUpAgents, type AgentChoice } from './agents.js';
 import { createHelpdesk, GENERAL_CHANNEL, type ActionOutcome, type Chat } from './helpdesk.js';
-import { openFailed, RESOLVE_ACTION, TAKE_ACTION } from './messages.js';
+import { ESCALATE_ACTION, openFailed, RESOLVE_ACTION, TAKE_ACTION } from './messages.js';
 import type { TicketStore } from './ticket-store.js';
 import {
+  ESCALATE_TICKET_VIEW,
+  escalateModal,
   messagePermalink,
   OPEN_TICKET_VIEW,
+  parseEscalateSubmission,
   parseResolveSubmission,
   parseTicketSubmission,
   RESOLVE_TICKET_VIEW,
@@ -112,11 +116,36 @@ export function registerListeners(
     const outcome = await helpdesk(client.chat).resolve(ticketNumber, body.user.id, details);
     logOutcome(logger, 'resolve', ticketNumber, body.user.id, outcome);
   });
+
+  app.action(ESCALATE_ACTION, async ({ ack, body, action, client, logger }) => {
+    await ack();
+    if (action.type !== 'button' || !('trigger_id' in body)) return;
+    const ticket = await helpdesk(client.chat).ticketForAgent(action.value ?? '', body.user.id);
+    if (!ticket) return;
+    await openEscalateModal(client, logger, {
+      triggerId: body.trigger_id,
+      ticketNumber: ticket.number,
+      agentIds,
+      currentAgentId: ticket.agentId,
+    });
+  });
+
+  app.view(ESCALATE_TICKET_VIEW, async ({ ack, body, view, client, logger }) => {
+    const parsed = parseEscalateSubmission(view, agentIds, body.user.id);
+    if (!parsed.ok) {
+      await ack({ response_action: 'errors', errors: parsed.errors });
+      return;
+    }
+    await ack();
+    const { ticketNumber, agentId } = parsed.value;
+    const outcome = await helpdesk(client.chat).escalate(ticketNumber, body.user.id, agentId);
+    logOutcome(logger, 'escalate', ticketNumber, body.user.id, outcome);
+  });
 }
 
 /**
  * How long the Agent name lookup may take. Bolt only replies to Slack once the listener is done,
- * and Slack shows the Requester an error if that takes over 3s (Slack's client retries a failed call).
+ * and Slack shows the user an error if that takes over 3s (Slack's client retries a failed call).
  */
 const NAME_LOOKUP_BUDGET_MS = 1000;
 
@@ -127,8 +156,7 @@ export interface ModalClient {
 
 /**
  * Opens the ticket modal with the Agents shown by member ID, then swaps in their current Slack
- * names. Opening first keeps us inside the trigger's 3s window however slow the lookups are.
- * Slack keeps what the Requester has already entered, since the blocks keep their IDs.
+ * names (see `openWithAgentNames`).
  */
 export async function openTicketModal(
   client: ModalClient,
@@ -137,7 +165,7 @@ export async function openTicketModal(
     triggerId,
     agentIds,
     prefill,
-    lookupBudgetMs = NAME_LOOKUP_BUDGET_MS,
+    lookupBudgetMs,
   }: {
     triggerId: string;
     agentIds: string[];
@@ -145,10 +173,67 @@ export async function openTicketModal(
     lookupBudgetMs?: number;
   },
 ): Promise<void> {
+  await openWithAgentNames(client, logger, {
+    triggerId,
+    agentIds,
+    modal: (agents) => ticketModal(agents, prefill),
+    lookupBudgetMs,
+  });
+}
+
+/**
+ * Opens the Escalate modal offering every configured Agent but the Ticket's current one, shown by
+ * member ID, then swaps in their current Slack names (see `openWithAgentNames`).
+ */
+export async function openEscalateModal(
+  client: ModalClient,
+  logger: { warn(...msg: unknown[]): void },
+  {
+    triggerId,
+    ticketNumber,
+    agentIds,
+    currentAgentId,
+    lookupBudgetMs,
+  }: {
+    triggerId: string;
+    ticketNumber: string;
+    agentIds: string[];
+    currentAgentId: string;
+    lookupBudgetMs?: number;
+  },
+): Promise<void> {
+  await openWithAgentNames(client, logger, {
+    triggerId,
+    agentIds: agentIds.filter((id) => id !== currentAgentId),
+    modal: (agents) => escalateModal(ticketNumber, agents),
+    lookupBudgetMs,
+  });
+}
+
+/**
+ * Opens `modal` with the Agents shown by member ID, then swaps in their current Slack names.
+ * Opening first keeps us inside the trigger's 3s window however slow the lookups are.
+ * Slack keeps what the user has already entered, since the blocks keep their IDs.
+ */
+async function openWithAgentNames(
+  client: ModalClient,
+  logger: { warn(...msg: unknown[]): void },
+  {
+    triggerId,
+    agentIds,
+    modal,
+    lookupBudgetMs = NAME_LOOKUP_BUDGET_MS,
+  }: {
+    triggerId: string;
+    agentIds: string[];
+    modal: (agents: AgentChoice[]) => ModalView;
+    lookupBudgetMs?: number;
+  },
+): Promise<void> {
   const labelledById = agentIds.map((id) => ({ id, name: id }));
   const { view: opened } = await client.views.open({
     trigger_id: triggerId,
-    view: ticketModal(labelledById, prefill),
+    view: modal(labelledById),
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const agents = await Promise.race([
@@ -166,11 +251,11 @@ export async function openTicketModal(
     await client.views.update({
       view_id: opened.id,
       hash: opened.hash,
-      view: ticketModal(agents, prefill),
+      view: modal(agents),
     });
   } catch (err) {
-    // Most likely the Requester already submitted or closed it; the member IDs did the job.
-    logger.warn('Could not show Agent names in the ticket modal', err);
+    // Most likely the user already submitted or closed it; the member IDs did the job.
+    logger.warn('Could not show Agent names in the modal', err);
   }
 }
 

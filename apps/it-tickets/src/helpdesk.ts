@@ -3,16 +3,24 @@ import {
   announcement,
   announcementFollowUp,
   confirmation,
+  escalatedAwayCard,
+  escalatedUpdate,
   resolvedUpdate,
   takenUpdate,
   ticketCard,
   type Message,
   type TicketDetails,
 } from './messages.js';
-import type { MessageRef, Resolution, Ticket, TicketDraft } from './ticket.js';
+import {
+  canEscalate,
+  type MessageRef,
+  type Resolution,
+  type Ticket,
+  type TicketDraft,
+} from './ticket.js';
 import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
 
-export type Chat = Pick<WebClient['chat'], 'postMessage' | 'update'>;
+export type Chat = Pick<WebClient['chat'], 'postMessage' | 'update' | 'delete'>;
 
 export interface HelpdeskDeps {
   store: TicketStore;
@@ -37,7 +45,7 @@ export interface ResolveDetails {
   postFollowUp?: boolean;
 }
 
-/** The Ticket lifecycle: open, Take, Resolve, and the Slack messages each step produces. */
+/** The Ticket lifecycle: open, Take, Resolve, Escalate, and the Slack messages each step produces. */
 export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: HelpdeskDeps) {
   async function post(channel: string, message: Message, threadTs?: string): Promise<MessageRef> {
     const res = await chat.postMessage({ channel, ...message, thread_ts: threadTs });
@@ -59,6 +67,24 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
     return stored && withAgent(stored);
   }
 
+  /** The Ticket has moved on (e.g. a double click): make sure its card reflects reality. */
+  async function stale(ticketNumber: string): Promise<ActionOutcome> {
+    const current = await findTicket(ticketNumber);
+    if (!current) return 'not-found';
+    await refreshCard(current);
+    return 'stale';
+  }
+
+  async function updateAnnouncement(ticket: Ticket, change: string): Promise<void> {
+    if (!ticket.announcement) return;
+    try {
+      await chat.update({ ...ticket.announcement, ...announcement(ticket) });
+    } catch (err) {
+      // The Ticket has changed and both sides know; a stale Announcement isn't worth alarming anyone.
+      logger.warn(`Failed to ${change} the Announcement of ${ticket.number}`, err);
+    }
+  }
+
   async function transition(
     ticketNumber: string,
     actorId: string,
@@ -67,17 +93,16 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
     update: (ticket: Ticket) => Message,
     afterwards?: (ticket: Ticket) => Promise<void>,
   ): Promise<ActionOutcome> {
-    const ticket = await findTicket(ticketNumber);
-    if (!ticket) return 'not-found';
-    if (actorId !== ticket.agentId) return 'not-agent';
-    const stored = await store.update(ticketNumber, from, changes);
-    if (!stored) {
-      // Already moved on (e.g. a double click): make sure the card reflects reality.
-      const current = await findTicket(ticketNumber);
-      if (!current) return 'not-found';
-      await refreshCard(current);
-      return 'stale';
-    }
+    const found = await store.get(ticketNumber);
+    if (!found) return 'not-found';
+    if (actorId !== withAgent(found).agentId) return 'not-agent';
+    // Also guard on the Agent, so an Escalation in between turns this into a stale action.
+    const stored = await store.update(
+      ticketNumber,
+      { status: from, agentId: found.agentId ?? null },
+      changes,
+    );
+    if (!stored) return stale(ticketNumber);
     const updated = withAgent(stored);
     await refreshCard(updated);
     await post(updated.confirmation.channel, update(updated), updated.confirmation.ts);
@@ -144,12 +169,7 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
         async (resolved) => {
           if (!resolved.announcement) return;
           const { channel, ts } = resolved.announcement;
-          try {
-            await chat.update({ channel, ts, ...announcement(resolved) });
-          } catch (err) {
-            // As with the follow-up: the Ticket is Resolved and both sides know.
-            logger.warn(`Failed to mark the Announcement of ${resolved.number} Resolved`, err);
-          }
+          await updateAnnouncement(resolved, 'mark Resolved');
           if (!postFollowUp) return;
           try {
             await post(channel, announcementFollowUp(resolved), ts);
@@ -159,6 +179,52 @@ export function createHelpdesk({ store, chat, legacyAgentId, now, logger }: Help
           }
         },
       );
+    },
+
+    /**
+     * Makes `toAgentId` the Ticket's Agent, keeping its Status. The new Agent gets a fresh Ticket card,
+     * which is the one kept up to date from then on; the previous Agent's card says where it went.
+     * The caller makes sure `toAgentId` is another configured Agent.
+     */
+    async escalate(
+      ticketNumber: string,
+      actorId: string,
+      toAgentId: string,
+    ): Promise<ActionOutcome> {
+      const found = await store.get(ticketNumber);
+      if (!found) return 'not-found';
+      const ticket = withAgent(found);
+      if (actorId !== ticket.agentId) return 'not-agent';
+      if (!canEscalate(ticket)) return stale(ticketNumber);
+
+      const changes = {
+        agentId: toAgentId,
+        escalatedFrom: ticket.agentId,
+        escalatedAt: now().toISOString(),
+      };
+      // Post to the new Agent first, as in `open`: one who can't be messaged fails before anything changes.
+      const card = await post(toAgentId, ticketCard({ ...ticket, ...changes }));
+      // Guard on the Status as read too, so the new card can't show actions the Ticket has moved past.
+      const stored = await store.update(
+        ticketNumber,
+        { status: [ticket.status], agentId: found.agentId ?? null, unescalated: true },
+        { ...changes, card },
+      );
+      if (!stored) {
+        // Lost a race (e.g. a double submit): the card just sent belongs to no Ticket.
+        await chat.delete(card);
+        return stale(ticketNumber);
+      }
+
+      const escalated = withAgent(stored);
+      await chat.update({ ...ticket.card, ...escalatedAwayCard(escalated) });
+      await post(
+        escalated.confirmation.channel,
+        escalatedUpdate(escalated),
+        escalated.confirmation.ts,
+      );
+      await updateAnnouncement(escalated, 'name the new Agent in');
+      return 'done';
     },
   };
 }

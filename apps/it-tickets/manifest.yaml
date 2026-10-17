@@ -31,7 +31,7 @@ oauth_config:
       - commands
       - chat:write
       - chat:write.public
-      # Shows each Agent's current Slack name in the ticket modal.
+      # Shows each Agent's current Slack name in the ticket and Escalate modals.
       - users:read
 settings:
   interactivity:

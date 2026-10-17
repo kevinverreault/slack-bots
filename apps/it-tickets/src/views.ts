@@ -14,6 +14,7 @@ import {
 
 export const OPEN_TICKET_VIEW = 'open_ticket';
 export const RESOLVE_TICKET_VIEW = 'resolve_ticket';
+export const ESCALATE_TICKET_VIEW = 'escalate_ticket';
 
 const TITLE_MAX = 150;
 const DESCRIPTION_MAX = 2900;
@@ -93,20 +94,7 @@ export function ticketModal(agents: AgentChoice[], prefill: TicketModalPrefill =
           initial_option: option('Normal'),
         },
       },
-      {
-        type: 'input',
-        block_id: 'agent',
-        label: { type: 'plain_text', text: 'Agent' },
-        element: {
-          type: 'static_select',
-          action_id: 'value',
-          placeholder: { type: 'plain_text', text: 'Pick the Agent to send it to' },
-          options: agents.map(({ id, name }) => ({
-            text: { type: 'plain_text', text: name },
-            value: id,
-          })),
-        },
-      },
+      agentSelect(agents, 'Pick the Agent to send it to'),
       generalCheckbox('Also post this ticket in #general'),
     ],
   };
@@ -125,7 +113,7 @@ export function parseTicketSubmission(
   const description = values.description?.value?.value?.trim() ?? '';
   const category = values.category?.value?.selected_option?.value as Category | undefined;
   const urgency = values.urgency?.value?.selected_option?.value as Urgency | undefined;
-  const agentId = values.agent?.value?.selected_option?.value;
+  const agentId = chosenAgent(values, agentIds);
   const postToGeneral = generalTicked(values);
 
   const errors: Record<string, string> = {};
@@ -133,7 +121,7 @@ export function parseTicketSubmission(
   if (!description) errors.description = 'Please describe the problem.';
   if (!category || !CATEGORIES.includes(category)) errors.category = 'Please pick a category.';
   if (!urgency || !URGENCIES.includes(urgency)) errors.urgency = 'Please pick an urgency.';
-  if (!agentId || !agentIds.includes(agentId)) errors.agent = 'Please pick an Agent from the list.';
+  if (!agentId) errors.agent = PICK_AN_AGENT;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const metadata = parseMetadata(view.private_metadata);
@@ -222,9 +210,84 @@ export function parseResolveSubmission(view: ViewOutput): ParseResult<ResolveSub
   };
 }
 
+/**
+ * The form the Agent fills in to Escalate a Ticket to one of `agents`, which leaves out the Agent
+ * themselves. With no one to escalate to, it only says so.
+ */
+export function escalateModal(ticketNumber: string, agents: AgentChoice[]): ModalView {
+  const modal: ModalView = {
+    type: 'modal',
+    callback_id: ESCALATE_TICKET_VIEW,
+    private_metadata: ticketNumber,
+    title: { type: 'plain_text', text: `Escalate ${ticketNumber}` },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [agentSelect(agents, 'Pick the Agent to escalate to')],
+  };
+  if (agents.length > 0) return { ...modal, submit: { type: 'plain_text', text: 'Escalate' } };
+  return {
+    ...modal,
+    close: { type: 'plain_text', text: 'OK' },
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'plain_text', text: 'There is no other Agent to escalate this ticket to.' },
+      },
+    ],
+  };
+}
+
+export interface EscalateSubmission {
+  ticketNumber: string;
+  /** The Agent to Escalate to. */
+  agentId: string;
+}
+
+/** Reads a submitted Escalate modal. The chosen Agent must be one of `agentIds`, other than `actorId`. */
+export function parseEscalateSubmission(
+  view: ViewOutput,
+  agentIds: readonly string[],
+  actorId: string,
+): ParseResult<EscalateSubmission> {
+  const agentId = chosenAgent(
+    view.state.values,
+    agentIds.filter((id) => id !== actorId),
+  );
+  if (!agentId) return { ok: false, errors: { agent: PICK_AN_AGENT } };
+  return { ok: true, value: { ticketNumber: view.private_metadata, agentId } };
+}
+
 /** Builds a permalink without an API call, so the modal opens within the trigger's 3s window. */
 export function messagePermalink(teamDomain: string, channelId: string, ts: string): string {
   return `https://${teamDomain}.slack.com/archives/${channelId}/p${ts.replace('.', '')}`;
+}
+
+const PICK_AN_AGENT = 'Please pick an Agent from the list.';
+
+/** A required dropdown of `agents`, with none picked. */
+function agentSelect(agents: AgentChoice[], placeholder: string): ModalView['blocks'][number] {
+  return {
+    type: 'input',
+    block_id: 'agent',
+    label: { type: 'plain_text', text: 'Agent' },
+    element: {
+      type: 'static_select',
+      action_id: 'value',
+      placeholder: { type: 'plain_text', text: placeholder },
+      options: agents.map(({ id, name }) => ({
+        text: { type: 'plain_text', text: name },
+        value: id,
+      })),
+    },
+  };
+}
+
+/** The Agent picked in the `agent` dropdown, if it is one of `allowed`. */
+function chosenAgent(
+  values: ViewOutput['state']['values'],
+  allowed: readonly string[],
+): string | undefined {
+  const agentId = values.agent?.value?.selected_option?.value;
+  return agentId && allowed.includes(agentId) ? agentId : undefined;
 }
 
 /** An optional, unticked box asking to also post something in #general. */
