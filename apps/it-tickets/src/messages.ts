@@ -1,8 +1,9 @@
 import type { KnownBlock } from '@slack/types';
-import { canResolve, canTake, formatLeadTime, type Ticket } from './ticket.js';
+import { canEscalate, canResolve, canTake, formatLeadTime, type Ticket } from './ticket.js';
 
 export const TAKE_ACTION = 'ticket_take';
 export const RESOLVE_ACTION = 'ticket_resolve';
+export const ESCALATE_ACTION = 'ticket_escalate';
 
 /** A Ticket before it has been posted anywhere. */
 export type TicketDetails = Omit<Ticket, 'confirmation' | 'card'>;
@@ -13,26 +14,15 @@ export interface Message {
 }
 
 const STATUS_EMOJI = { Open: '🆕', 'In progress': '🛠️', Resolved: '✅' } as const;
+const ESCALATED_EMOJI = '⏫';
 const URGENCY_EMOJI = { Low: '🟢', Normal: '🟡', High: '🔴' } as const;
 
 /** The Agent's view of a Ticket, kept up to date as its Status changes. */
 export function ticketCard(ticket: TicketDetails): Message {
-  const blocks: KnownBlock[] = [
-    header(`🎫 ${ticket.number}: ${ticket.title}`),
-    context(
-      ticket.status === 'Open'
-        ? `New ticket for you from <@${ticket.requesterId}>`
-        : `Ticket from <@${ticket.requesterId}>`,
-    ),
-    detailFields(ticket),
-    { type: 'section', text: { type: 'mrkdwn', text: quote(ticket.description) } },
-  ];
-  if (ticket.sourcePermalink) {
-    blocks.push(context(`Raised from <${ticket.sourcePermalink}|this message>`));
-  }
-  if (ticket.resolutionNote) {
-    blocks.push(section(`*Resolution note*\n${quote(ticket.resolutionNote)}`));
-  }
+  let from = `Ticket from <@${ticket.requesterId}>`;
+  if (ticket.escalatedFrom) from += `, escalated to you by <@${ticket.escalatedFrom}>`;
+  else if (ticket.status === 'Open') from = `New ticket for you from <@${ticket.requesterId}>`;
+  const blocks = cardBlocks(ticket, from);
 
   const buttons = [];
   if (canTake(ticket.status)) {
@@ -52,11 +42,28 @@ export function ticketCard(ticket: TicketDetails): Message {
       value: ticket.number,
     });
   }
+  if (canEscalate(ticket)) {
+    buttons.push({
+      type: 'button' as const,
+      action_id: ESCALATE_ACTION,
+      text: { type: 'plain_text' as const, text: 'Escalate' },
+      value: ticket.number,
+    });
+  }
   if (buttons.length > 0) blocks.push({ type: 'actions', elements: buttons });
 
   return {
     text: `🎫 ${ticket.number} (${ticket.status}): ${ticket.title}`,
     blocks,
+  };
+}
+
+/** What the previous Agent's Ticket card becomes once they Escalate it: no longer theirs to act on. */
+export function escalatedAwayCard(ticket: TicketDetails): Message {
+  const escalated = `${ESCALATED_EMOJI} Escalated to <@${ticket.agentId}>`;
+  return {
+    text: `🎫 ${ticket.number} (${escalated}): ${ticket.title}`,
+    blocks: cardBlocks(ticket, `Ticket from <@${ticket.requesterId}> · ${escalated}`),
   };
 }
 
@@ -107,6 +114,12 @@ export function takenUpdate(ticket: TicketDetails): Message {
   return { text, blocks: [section(text)] };
 }
 
+/** Tells the Requester their Ticket was Escalated. `ticket` is as it is now, after the Escalation. */
+export function escalatedUpdate(ticket: TicketDetails): Message {
+  const text = `${ESCALATED_EMOJI} *${ticket.number}* has been escalated from <@${ticket.escalatedFrom}> to <@${ticket.agentId}>.`;
+  return { text, blocks: [section(text)] };
+}
+
 export function resolvedUpdate(ticket: TicketDetails): Message {
   return resolvedMessage(
     `✅ *${ticket.number}* has been resolved by <@${ticket.agentId}>.`,
@@ -126,6 +139,26 @@ export function openFailed(): Message {
   const text =
     '⚠️ Sorry, something went wrong and your ticket could not be opened. Please try again in a moment.';
   return { text, blocks: [section(text)] };
+}
+
+/** A Ticket card's details under `from`, the line saying whom it came from. */
+function cardBlocks(ticket: TicketDetails, from: string): KnownBlock[] {
+  const blocks: KnownBlock[] = [
+    header(`🎫 ${ticket.number}: ${ticket.title}`),
+    context(from),
+    detailFields(ticket),
+    { type: 'section', text: { type: 'mrkdwn', text: quote(ticket.description) } },
+  ];
+  if (ticket.sourcePermalink) {
+    blocks.push(context(`Raised from <${ticket.sourcePermalink}|this message>`));
+  }
+  if (ticket.resolutionNote) {
+    blocks.push(
+      section(`*Resolution note*
+${quote(ticket.resolutionNote)}`),
+    );
+  }
+  return blocks;
 }
 
 /** `headline`, then the Ticket's Resolution and Resolution note, each if it has one. */

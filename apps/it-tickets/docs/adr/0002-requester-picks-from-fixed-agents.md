@@ -1,5 +1,5 @@
 ---
-status: accepted (supersedes ADR-0001)
+status: accepted (supersedes ADR-0001); partly superseded by ADR-0003, which lets an Agent Escalate a Ticket once
 ---
 
 # The Requester picks the Agent from a fixed list; still no ticketing system

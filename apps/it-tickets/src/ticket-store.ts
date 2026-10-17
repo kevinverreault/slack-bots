@@ -11,8 +11,36 @@ import { formatTicketNumber, type MessageRef, type Status, type Ticket } from '.
 export type StoredTicket = Omit<Ticket, 'agentId'> & Partial<Pick<Ticket, 'agentId'>>;
 
 export type TicketChanges = Partial<
-  Pick<Ticket, 'status' | 'takenAt' | 'resolvedAt' | 'resolution' | 'resolutionNote'>
+  Pick<
+    Ticket,
+    | 'status'
+    | 'takenAt'
+    | 'resolvedAt'
+    | 'resolution'
+    | 'resolutionNote'
+    | 'agentId'
+    | 'card'
+    | 'escalatedFrom'
+    | 'escalatedAt'
+  >
 >;
+
+/** What a Ticket must still look like for an update to apply. */
+export interface TicketGuard {
+  /** It is in one of these Statuses. */
+  status: Status[];
+  /** It still has this Agent recorded; `null` means it must have none, as for a legacy Ticket. */
+  agentId?: string | null;
+  /** It has not been Escalated. */
+  unescalated?: boolean;
+}
+
+/** Whether `ticket` passes `guard`. */
+export function passesGuard(ticket: StoredTicket, guard: TicketGuard): boolean {
+  if (!guard.status.includes(ticket.status)) return false;
+  if (guard.agentId !== undefined && (ticket.agentId ?? null) !== guard.agentId) return false;
+  return !(guard.unescalated && ticket.escalatedFrom);
+}
 
 export interface TicketStore {
   /** Reserves the next Ticket number. Numbers are never reused. */
@@ -20,10 +48,14 @@ export interface TicketStore {
   create(ticket: Ticket): Promise<void>;
   get(number: string): Promise<StoredTicket | undefined>;
   /**
-   * Applies `changes` only if the Ticket is currently in one of the `from` statuses.
-   * Returns the updated Ticket, or undefined if it does not exist or its status didn't match.
+   * Applies `changes` only if the Ticket currently passes `guard`.
+   * Returns the updated Ticket, or undefined if it does not exist or failed the guard.
    */
-  update(number: string, from: Status[], changes: TicketChanges): Promise<StoredTicket | undefined>;
+  update(
+    number: string,
+    guard: TicketGuard,
+    changes: TicketChanges,
+  ): Promise<StoredTicket | undefined>;
   /** Records where the Ticket's Announcement was posted, whatever its Status. Throws if it does not exist. */
   recordAnnouncement(number: string, announcement: MessageRef): Promise<void>;
 }
@@ -76,13 +108,30 @@ export class DynamoTicketStore implements TicketStore {
 
   async update(
     number: string,
-    from: Status[],
+    guard: TicketGuard,
     changes: TicketChanges,
   ): Promise<StoredTicket | undefined> {
     const entries = Object.entries(changes).filter(([, value]) => value !== undefined);
     const names: Record<string, string> = { '#status': 'status' };
     const values: Record<string, unknown> = {};
-    from.forEach((status, i) => (values[`:from${i}`] = status));
+    guard.status.forEach((status, i) => (values[`:from${i}`] = status));
+    const conditions = [
+      'attribute_exists(pk)',
+      `#status IN (${guard.status.map((_, i) => `:from${i}`).join(', ')})`,
+    ];
+    if (guard.agentId !== undefined) {
+      names['#agentId'] = 'agentId';
+      if (guard.agentId === null) {
+        conditions.push('attribute_not_exists(#agentId)');
+      } else {
+        values[':agentId'] = guard.agentId;
+        conditions.push('#agentId = :agentId');
+      }
+    }
+    if (guard.unescalated) {
+      names['#escalatedFrom'] = 'escalatedFrom';
+      conditions.push('attribute_not_exists(#escalatedFrom)');
+    }
     const sets = entries.map(([key, value], i) => {
       names[`#k${i}`] = key;
       values[`:v${i}`] = value;
@@ -95,7 +144,7 @@ export class DynamoTicketStore implements TicketStore {
           TableName: this.tableName,
           Key: { pk: ticketKey(number) },
           UpdateExpression: `SET ${sets.join(', ')}`,
-          ConditionExpression: `attribute_exists(pk) AND #status IN (${from.map((_, i) => `:from${i}`).join(', ')})`,
+          ConditionExpression: conditions.join(' AND '),
           ExpressionAttributeNames: names,
           ExpressionAttributeValues: values,
           ReturnValues: 'ALL_NEW',

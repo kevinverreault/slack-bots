@@ -20,6 +20,10 @@ _Avoid_: State, stage
 The Agent's act of moving an Open Ticket to In progress.
 _Avoid_: Claim, accept, assign
 
+**Escalate**:
+The Agent's act of making another Agent the Agent of a Ticket that isn't Resolved. Its Status stays as it was. A Ticket can be Escalated only once.
+_Avoid_: Reassign, transfer, hand off
+
 **Resolve**:
 The Agent's act of moving a Ticket to Resolved, picking its Resolution and optionally adding a Resolution note.
 _Avoid_: Close, complete, finish
@@ -37,7 +41,7 @@ The Slack user who raised a Ticket.
 _Avoid_: Reporter, customer, submitter
 
 **Agent**:
-One of the Slack users, fixed by configuration, whom a Requester can pick to receive a Ticket. A Ticket's Agent never changes, and only they work on it.
+One of the Slack users, fixed by configuration, whom a Requester can pick to receive a Ticket. Only a Ticket's Agent works on it. Its Agent changes only if it is Escalated.
 _Avoid_: Assignee, admin, handler, configured user
 
 **Confirmation**:
@@ -45,11 +49,11 @@ The private message the Requester receives when their Ticket is opened. Every la
 _Avoid_: Receipt, acknowledgement
 
 **Ticket card**:
-The private message a Ticket's Agent receives for it. It shows the Ticket's details and the actions available at its current Status, and it is kept up to date as the Status changes.
+The private message a Ticket's Agent receives for it. It shows the Ticket's details and the actions available at its current Status, and it is kept up to date as the Status changes. When the Ticket is Escalated, the new Agent receives a Ticket card of their own, which is kept up to date from then on. The previous Agent's card is updated to say where the Ticket went, and loses its actions.
 _Avoid_: Notification, alert
 
 **Announcement**:
-An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is edited once, when the Ticket is Resolved, to show its Resolution, when it was Resolved and its Lead time, but never the Resolution note. It may also get an Announcement follow-up in its thread.
+An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is edited when the Ticket is Escalated, to name the new Agent, and when it is Resolved, to show its Resolution, when it was Resolved and its Lead time, but never the Resolution note. It may also get an Announcement follow-up in its thread.
 _Avoid_: Broadcast, share
 
 **Announcement follow-up**:

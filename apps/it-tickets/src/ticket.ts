@@ -42,6 +42,9 @@ export interface Ticket extends TicketDraft {
   card: MessageRef;
   /** Where the Ticket was posted in #general, once its Announcement is recorded. */
   announcement?: MessageRef;
+  /** The Agent the Ticket was Escalated from, once it has been. A Ticket is Escalated at most once. */
+  escalatedFrom?: string;
+  escalatedAt?: string;
 }
 
 export function formatTicketNumber(sequence: number): string {
@@ -71,4 +74,9 @@ export function canTake(status: Status): boolean {
 
 export function canResolve(status: Status): boolean {
   return status === 'Open' || status === 'In progress';
+}
+
+/** Whether `ticket`'s Agent may still Escalate it: it isn't Resolved and hasn't been Escalated. */
+export function canEscalate(ticket: Pick<Ticket, 'status' | 'escalatedFrom'>): boolean {
+  return canResolve(ticket.status) && !ticket.escalatedFrom;
 }

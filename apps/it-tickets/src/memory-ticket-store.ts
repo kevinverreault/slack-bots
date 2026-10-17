@@ -1,5 +1,11 @@
-import { formatTicketNumber, type MessageRef, type Status, type Ticket } from './ticket.js';
-import type { StoredTicket, TicketChanges, TicketStore } from './ticket-store.js';
+import { formatTicketNumber, type MessageRef, type Ticket } from './ticket.js';
+import {
+  passesGuard,
+  type StoredTicket,
+  type TicketChanges,
+  type TicketGuard,
+  type TicketStore,
+} from './ticket-store.js';
 
 /** In-memory TicketStore for tests. */
 export class MemoryTicketStore implements TicketStore {
@@ -22,11 +28,11 @@ export class MemoryTicketStore implements TicketStore {
 
   async update(
     number: string,
-    from: Status[],
+    guard: TicketGuard,
     changes: TicketChanges,
   ): Promise<StoredTicket | undefined> {
     const ticket = this.tickets.get(number);
-    if (!ticket || !from.includes(ticket.status)) return undefined;
+    if (!ticket || !passesGuard(ticket, guard)) return undefined;
     Object.assign(ticket, changes);
     return structuredClone(ticket);
   }

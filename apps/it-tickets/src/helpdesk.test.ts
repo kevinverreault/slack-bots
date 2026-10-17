@@ -17,7 +17,7 @@ const draft: TicketDraft = {
 const FIXED = { resolution: 'Fixed' } as const;
 
 interface Call {
-  method: 'postMessage' | 'update';
+  method: 'postMessage' | 'update' | 'delete';
   args: Record<string, unknown>;
 }
 
@@ -32,6 +32,10 @@ function fakeChat() {
     },
     update: async (args: Record<string, unknown>) => {
       calls.push({ method: 'update', args });
+      return { ok: true };
+    },
+    delete: async (args: Record<string, unknown>) => {
+      calls.push({ method: 'delete', args });
       return { ok: true };
     },
   };
@@ -108,9 +112,9 @@ describe('helpdesk', () => {
       expect(calls[3]!.args.text).toContain(`<@${OTHER_AGENT}> will be in touch`);
     });
 
-    it('offers Take and Resolve on a new Ticket card', async () => {
+    it('offers Take, Resolve and Escalate on a new Ticket card', async () => {
       await helpdesk.open(draft);
-      expect(buttonsOf(calls[0]!)).toEqual(['ticket_take', 'ticket_resolve']);
+      expect(buttonsOf(calls[0]!)).toEqual(['ticket_take', 'ticket_resolve', 'ticket_escalate']);
     });
 
     it('names the Agent in the Confirmation', async () => {
@@ -228,7 +232,7 @@ describe('helpdesk', () => {
       expect((await store.get(ticket.number))?.status).toBe('In progress');
       const [update, reply] = calls;
       expect(update).toMatchObject({ method: 'update', args: ticket.card });
-      expect(buttonsOf(update!)).toEqual(['ticket_resolve']);
+      expect(buttonsOf(update!)).toEqual(['ticket_resolve', 'ticket_escalate']);
       expect(reply).toMatchObject({
         method: 'postMessage',
         args: { channel: ticket.confirmation.channel, thread_ts: ticket.confirmation.ts },
@@ -493,6 +497,225 @@ describe('helpdesk', () => {
     });
   });
 
+  describe('escalate', () => {
+    /** The Ticket card the new Agent received when `ticket` was Escalated to them. */
+    const newCardOf = async (ticket: Ticket) => (await store.get(ticket.number))!.card;
+
+    it('gives an Open Ticket to the chosen Agent, keeping it Open', async () => {
+      const ticket = await helpdesk.open(draft);
+      clock = new Date('2026-10-14T13:00:00Z');
+
+      expect(await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT)).toBe('done');
+
+      expect(await store.get(ticket.number)).toMatchObject({
+        agentId: OTHER_AGENT,
+        status: 'Open',
+        escalatedFrom: AGENT,
+        escalatedAt: '2026-10-14T13:00:00.000Z',
+        card: { channel: `D${OTHER_AGENT}` },
+      });
+    });
+
+    it('sends the new Agent a Ticket card with the actions for its Status, but no Escalate', async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      const [card] = calls;
+      expect(card).toMatchObject({ method: 'postMessage', args: { channel: OTHER_AGENT } });
+      expect(buttonsOf(card!)).toEqual(['ticket_take', 'ticket_resolve']);
+    });
+
+    it("updates the previous Agent's card to say it was Escalated, with no buttons left", async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      const update = calls.find((c) => c.method === 'update')!;
+      expect(update.args).toMatchObject(ticket.card);
+      expect(buttonsOf(update)).toEqual([]);
+      expect(update.args.text).toContain(`Escalated to <@${OTHER_AGENT}>`);
+      expect(JSON.stringify(update.args.blocks)).toContain(`Escalated to <@${OTHER_AGENT}>`);
+    });
+
+    it('tells the Requester in the Confirmation thread, naming both Agents', async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      expect(calls.map((c) => [c.method, c.args.channel])).toEqual([
+        ['postMessage', OTHER_AGENT],
+        ['update', ticket.card.channel],
+        ['postMessage', ticket.confirmation.channel],
+      ]);
+      const reply = calls[2]!.args;
+      expect(reply.thread_ts).toBe(ticket.confirmation.ts);
+      expect(reply.text).toContain(`from <@${AGENT}> to <@${OTHER_AGENT}>`);
+      expect(JSON.stringify(reply.blocks)).toContain(`from <@${AGENT}> to <@${OTHER_AGENT}>`);
+    });
+
+    it('keeps an In progress Ticket In progress, for the new Agent to Resolve on their card', async () => {
+      const ticket = await helpdesk.open(draft);
+      await helpdesk.take(ticket.number, AGENT);
+      calls.length = 0;
+
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      expect((await store.get(ticket.number))?.status).toBe('In progress');
+      expect(buttonsOf(calls[0]!)).toEqual(['ticket_resolve']);
+      const newCard = await newCardOf(ticket);
+      calls.length = 0;
+      expect(await helpdesk.resolve(ticket.number, OTHER_AGENT, FIXED)).toBe('done');
+      expect(calls[0]).toMatchObject({ method: 'update', args: newCard });
+      expect(calls[1]!.args.text).toContain(`resolved by <@${OTHER_AGENT}>`);
+    });
+
+    it('lets the new Agent Take an Open Ticket, updating their card', async () => {
+      const ticket = await helpdesk.open(draft);
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+      const newCard = await newCardOf(ticket);
+      calls.length = 0;
+
+      expect(await helpdesk.take(ticket.number, OTHER_AGENT)).toBe('done');
+
+      expect(calls[0]).toMatchObject({ method: 'update', args: newCard });
+      expect(buttonsOf(calls[0]!)).toEqual(['ticket_resolve']);
+      expect(calls[1]!.args.text).toContain(`<@${OTHER_AGENT}> has taken`);
+    });
+
+    it('refuses the previous Agent from then on', async () => {
+      const ticket = await helpdesk.open(draft);
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      expect(await helpdesk.take(ticket.number, AGENT)).toBe('not-agent');
+      expect(await helpdesk.resolve(ticket.number, AGENT, FIXED)).toBe('not-agent');
+      expect(await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT)).toBe('not-agent');
+      expect(await helpdesk.ticketForAgent(ticket.number, AGENT)).toBeUndefined();
+    });
+
+    it('is refused for anyone but the Agent, sending nothing', async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      expect(await helpdesk.escalate(ticket.number, REQUESTER, OTHER_AGENT)).toBe('not-agent');
+
+      expect(calls).toEqual([]);
+      expect((await store.get(ticket.number))?.agentId).toBe(AGENT);
+    });
+
+    it('reports unknown Tickets', async () => {
+      expect(await helpdesk.escalate('IT-9999', AGENT, OTHER_AGENT)).toBe('not-found');
+    });
+
+    it('refuses a second Escalation as stale, changing nothing but refreshing the card', async () => {
+      const ticket = await helpdesk.open(draft);
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+      const before = await store.get(ticket.number);
+      calls.length = 0;
+
+      expect(await helpdesk.escalate(ticket.number, OTHER_AGENT, AGENT)).toBe('stale');
+
+      expect(await store.get(ticket.number)).toEqual(before);
+      expect(calls).toEqual([{ method: 'update', args: expect.objectContaining(before!.card) }]);
+    });
+
+    it('refuses a Resolved Ticket as stale', async () => {
+      const ticket = await helpdesk.open(draft);
+      await helpdesk.resolve(ticket.number, AGENT, FIXED);
+      calls.length = 0;
+
+      expect(await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT)).toBe('stale');
+
+      expect((await store.get(ticket.number))?.agentId).toBe(AGENT);
+      expect(calls.map((c) => c.method)).toEqual(['update']);
+    });
+
+    it('refuses a double submit as stale, removing the extra Ticket card it sent', async () => {
+      const ticket = await helpdesk.open(draft);
+      calls.length = 0;
+
+      const outcomes = await Promise.all([
+        helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT),
+        helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT),
+      ]);
+
+      expect(outcomes.sort()).toEqual(['done', 'stale']);
+      const sent = calls.filter(
+        (c) => c.method === 'postMessage' && c.args.channel === OTHER_AGENT,
+      );
+      expect(sent).toHaveLength(2);
+      const kept = await newCardOf(ticket);
+      const deleted = calls.filter((c) => c.method === 'delete');
+      expect(deleted).toHaveLength(1);
+      expect(deleted[0]!.args).toMatchObject({ channel: `D${OTHER_AGENT}` });
+      expect(deleted[0]!.args.ts).not.toBe(kept.ts);
+      expect(calls.filter((c) => c.args.channel === ticket.confirmation.channel)).toHaveLength(1);
+    });
+
+    it('changes nothing if the new Agent cannot be messaged', async () => {
+      const ticket = await helpdesk.open(draft);
+      const failing = withChat(failingChat('channel_not_found'));
+
+      await expect(failing.escalate(ticket.number, AGENT, OTHER_AGENT)).rejects.toThrow(
+        'channel_not_found',
+      );
+      expect(await store.get(ticket.number)).toEqual(ticket);
+    });
+  });
+
+  describe('escalate an announced Ticket', () => {
+    const announcementEdits = () => generalCalls('update');
+
+    it('edits the Announcement so it is handled by the new Agent', async () => {
+      const ticket = await announced();
+
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+
+      const [edit] = announcementEdits();
+      expect(edit!.args.ts).toBe('100.3');
+      expect(edit!.args.text).toContain(`handled by <@${OTHER_AGENT}>`);
+      expect(JSON.stringify(edit!.args.blocks)).toContain(`handled by <@${OTHER_AGENT}>`);
+      expect(JSON.stringify(edit!.args)).not.toContain('Resolved');
+    });
+
+    it('still shows the Resolved line, naming the new Agent, once they Resolve it', async () => {
+      const ticket = await announced();
+      await helpdesk.escalate(ticket.number, AGENT, OTHER_AGENT);
+      calls.length = 0;
+
+      await helpdesk.resolve(ticket.number, OTHER_AGENT, FIXED);
+
+      const [edit] = announcementEdits();
+      expect(edit!.args.text).toContain(`handled by <@${OTHER_AGENT}>`);
+      expect(JSON.stringify(edit!.args.blocks)).toContain('*Resolved* · Fixed');
+    });
+
+    it('only warns if the edit fails, leaving the Ticket Escalated and everyone else updated', async () => {
+      const ticket = await announced();
+      const fake = fakeChat();
+      const update = fake.chat.update;
+      fake.chat.update = (async (args: { channel: string }) => {
+        if (args.channel === 'D#general') throw new Error('message_not_found');
+        return update(args as never);
+      }) as Chat['update'];
+      const flaky = withChat(fake.chat);
+
+      expect(await flaky.escalate(ticket.number, AGENT, OTHER_AGENT)).toBe('done');
+
+      expect((await store.get(ticket.number))?.agentId).toBe(OTHER_AGENT);
+      expect(fake.calls.map((c) => [c.method, c.args.channel])).toEqual([
+        ['postMessage', OTHER_AGENT],
+        ['update', ticket.card.channel],
+        ['postMessage', ticket.confirmation.channel],
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(String(warnings[0]![0])).toContain(ticket.number);
+    });
+  });
+
   describe('a Ticket opened before Agents were recorded', () => {
     /** Stores a Ticket the way it was stored before it had an `agentId`. */
     async function legacyTicket(): Promise<string> {
@@ -512,6 +735,17 @@ describe('helpdesk', () => {
       expect(calls[1]!.args.text).toContain(`<@${AGENT}> has taken`);
       expect(await helpdesk.resolve(number, AGENT, FIXED)).toBe('done');
       expect(calls[3]!.args.text).toContain(`resolved by <@${AGENT}>`);
+    });
+
+    it('can be Escalated by the legacy Agent, then belongs to the new Agent', async () => {
+      const number = await legacyTicket();
+
+      expect(await helpdesk.escalate(number, OTHER_AGENT, AGENT)).toBe('not-agent');
+      expect(await helpdesk.escalate(number, AGENT, OTHER_AGENT)).toBe('done');
+
+      expect(await store.get(number)).toMatchObject({ agentId: OTHER_AGENT, escalatedFrom: AGENT });
+      expect(await helpdesk.take(number, AGENT)).toBe('not-agent');
+      expect(await helpdesk.take(number, OTHER_AGENT)).toBe('done');
     });
   });
 });

@@ -1,6 +1,6 @@
 import type { ModalView } from '@slack/types';
 import { describe, expect, it } from 'vitest';
-import { openTicketModal, type ModalClient } from './listeners.js';
+import { openEscalateModal, openTicketModal, type ModalClient } from './listeners.js';
 
 interface FakeUser {
   display_name?: string;
@@ -108,5 +108,44 @@ describe('openTicketModal', () => {
     await openTicketModal(client, noLogs, { triggerId: 'T1', agentIds: ['UANA'] });
 
     expect(calls).toEqual(['views.open', 'users.info UANA']);
+  });
+});
+
+describe('openEscalateModal', () => {
+  it('offers every configured Agent but the current one, then shows them by their current Slack name', async () => {
+    const { client, calls, views } = fakeClient({
+      UANA: { display_name: 'ana' },
+      UBEN: { real_name: 'Ben Okafor' },
+      UCAT: { display_name: 'cat' },
+    });
+
+    await openEscalateModal(client, noLogs, {
+      triggerId: 'T1',
+      ticketNumber: 'IT-0003',
+      agentIds: ['UANA', 'UBEN', 'UCAT'],
+      currentAgentId: 'UBEN',
+    });
+
+    expect(calls[0]).toBe('views.open');
+    expect(agentOptions(views[0]!)).toEqual({ UANA: 'UANA', UCAT: 'UCAT' });
+    expect(calls).not.toContain('users.info UBEN');
+    expect(calls.at(-1)).toBe('views.update');
+    expect(agentOptions(views[1]!)).toEqual({ ana: 'UANA', cat: 'UCAT' });
+    expect(views[1]!.private_metadata).toBe('IT-0003');
+  });
+
+  it('leaves the modal as opened when the names take too long', async () => {
+    const { client, calls } = fakeClient({ UANA: { display_name: 'ana' } });
+    client.users.info = () => new Promise(() => {});
+
+    await openEscalateModal(client, noLogs, {
+      triggerId: 'T1',
+      ticketNumber: 'IT-0003',
+      agentIds: ['UANA', 'UBEN'],
+      currentAgentId: 'UBEN',
+      lookupBudgetMs: 5,
+    });
+
+    expect(calls).toEqual(['views.open']);
   });
 });

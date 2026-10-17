@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   announcement,
   announcementFollowUp,
+  escalatedAwayCard,
+  escalatedUpdate,
   resolvedUpdate,
   ticketCard,
   type Message,
@@ -26,7 +28,22 @@ const resolved: TicketDetails = {
 /** A Ticket Resolved before Resolutions existed. */
 const { resolution: _resolution, ...legacy } = resolved;
 
+/** `resolved`, Escalated from UAGENT to UOTHER while still In progress. */
+const escalated: TicketDetails = {
+  ...resolved,
+  status: 'In progress',
+  agentId: 'UOTHER',
+  escalatedFrom: 'UAGENT',
+  escalatedAt: '2026-10-14T13:00:00Z',
+  resolvedAt: undefined,
+  resolution: undefined,
+  resolutionNote: undefined,
+};
+
 const json = (message: Message) => JSON.stringify(message);
+/** The action IDs of the message's buttons, in order. */
+const buttons = (message: Message) =>
+  message.blocks.flatMap((b) => (b.type === 'actions' ? b.elements.map((e) => e.action_id) : []));
 /** The mrkdwn of each context block, in order. */
 const contexts = (message: Message) =>
   message.blocks.flatMap((b) =>
@@ -37,6 +54,30 @@ const sections = (message: Message) =>
   message.blocks.flatMap((b) => (b.type === 'section' && b.text ? [b.text.text] : []));
 
 describe('ticketCard', () => {
+  it('offers Escalate until the Ticket is Escalated or Resolved', () => {
+    const open = { ...escalated, status: 'Open', escalatedFrom: undefined } as const;
+    expect(buttons(ticketCard(open))).toEqual(['ticket_take', 'ticket_resolve', 'ticket_escalate']);
+    expect(buttons(ticketCard({ ...open, status: 'In progress' }))).toEqual([
+      'ticket_resolve',
+      'ticket_escalate',
+    ]);
+    expect(buttons(ticketCard({ ...escalated, status: 'Open' }))).toEqual([
+      'ticket_take',
+      'ticket_resolve',
+    ]);
+    expect(buttons(ticketCard(escalated))).toEqual(['ticket_resolve']);
+    expect(buttons(ticketCard(resolved))).toEqual([]);
+  });
+
+  it('tells the new Agent who Escalated the Ticket to them', () => {
+    expect(contexts(ticketCard(escalated))[0]).toBe(
+      'Ticket from <@UREQ>, escalated to you by <@UAGENT>',
+    );
+    expect(contexts(ticketCard({ ...escalated, status: 'Open' }))[0]).toBe(
+      'Ticket from <@UREQ>, escalated to you by <@UAGENT>',
+    );
+  });
+
   it('shows the Resolution of a Resolved Ticket', () => {
     expect(json(ticketCard(resolved))).toContain('*Resolution*\\nUnable to reproduce');
   });
@@ -46,6 +87,26 @@ describe('ticketCard', () => {
     expect(card).not.toContain('*Resolution*\\n');
     expect(card).not.toContain('undefined');
     expect(card).toContain('*Resolution note*');
+  });
+});
+
+describe('escalatedAwayCard', () => {
+  it('shows the previous Agent the Ticket, where it went, and no buttons', () => {
+    const card = escalatedAwayCard(escalated);
+    expect(contexts(card)[0]).toBe('Ticket from <@UREQ> · ⏫ Escalated to <@UOTHER>');
+    expect(card.text).toBe('🎫 IT-0007 (⏫ Escalated to <@UOTHER>): VPN is down');
+    expect(json(card)).toContain("Can't connect since this morning");
+    expect(buttons(card)).toEqual([]);
+  });
+});
+
+describe('escalatedUpdate', () => {
+  it('tells the Requester from whom and to whom their Ticket was Escalated', () => {
+    const update = escalatedUpdate(escalated);
+    expect(sections(update)).toEqual([
+      '⏫ *IT-0007* has been escalated from <@UAGENT> to <@UOTHER>.',
+    ]);
+    expect(update.text).toBe('⏫ *IT-0007* has been escalated from <@UAGENT> to <@UOTHER>.');
   });
 });
 
@@ -99,6 +160,12 @@ describe('announcementFollowUp', () => {
 });
 
 describe('announcement', () => {
+  it('names the new Agent once Escalated, with no Resolved line', () => {
+    const post = announcement(escalated);
+    expect(sections(post)[0]).toBe('📣 <@UREQ> opened IT ticket *IT-0007* · handled by <@UOTHER>');
+    expect(contexts(post)).toEqual([]);
+  });
+
   const resolvedAt = '<!date^1791991200^{date_short_pretty} {time}|2026-10-14T15:20:00Z>';
 
   it('shows the Resolution on its Resolved line, with when and the Lead time, but never the note', () => {

@@ -24,11 +24,76 @@ describe('MemoryTicketStore', () => {
   it('records the Announcement whatever the Status', async () => {
     const store = new MemoryTicketStore();
     await store.create(ticket);
-    await store.update(ticket.number, ['Open'], { status: 'In progress' });
+    await store.update(ticket.number, { status: ['Open'] }, { status: 'In progress' });
 
     await store.recordAnnouncement(ticket.number, announcement);
 
     expect(await store.get(ticket.number)).toMatchObject({ status: 'In progress', announcement });
+  });
+
+  it('applies changes only while the Ticket is in one of the guarded Statuses', async () => {
+    const store = new MemoryTicketStore();
+    await store.create(ticket);
+
+    expect(
+      await store.update(ticket.number, { status: ['In progress'] }, { status: 'Resolved' }),
+    ).toBeUndefined();
+    expect(
+      await store.update('IT-9999', { status: ['Open'] }, { status: 'Resolved' }),
+    ).toBeUndefined();
+    expect(
+      await store.update(ticket.number, { status: ['Open'] }, { status: 'In progress' }),
+    ).toMatchObject({
+      status: 'In progress',
+    });
+  });
+
+  it('applies changes only while the Ticket still has the guarded Agent', async () => {
+    const store = new MemoryTicketStore();
+    await store.create(ticket);
+    const escalation = { agentId: 'UOTHER', escalatedFrom: 'UAGENT' };
+
+    expect(
+      await store.update(ticket.number, { status: ['Open'], agentId: 'UOTHER' }, escalation),
+    ).toBeUndefined();
+    expect(
+      await store.update(ticket.number, { status: ['Open'], agentId: null }, escalation),
+    ).toBeUndefined();
+    expect(
+      await store.update(ticket.number, { status: ['Open'], agentId: 'UAGENT' }, escalation),
+    ).toMatchObject(escalation);
+  });
+
+  it('treats `agentId: null` as a guard on a Ticket with no recorded Agent', async () => {
+    const store = new MemoryTicketStore();
+    const { agentId: _agentId, ...legacy } = ticket;
+    await store.create(legacy as Ticket);
+
+    expect(
+      await store.update(
+        ticket.number,
+        { status: ['Open'], agentId: 'UAGENT' },
+        { status: 'In progress' },
+      ),
+    ).toBeUndefined();
+    expect(
+      await store.update(
+        ticket.number,
+        { status: ['Open'], agentId: null },
+        { status: 'In progress' },
+      ),
+    ).toMatchObject({
+      status: 'In progress',
+    });
+  });
+
+  it('applies changes guarded as unescalated only once', async () => {
+    const store = new MemoryTicketStore();
+    await store.create(ticket);
+    const guard = { status: ['Open' as const], unescalated: true };
+
+    expect(await store.update(ticket.number, guard, { escalatedFrom: 'UAGENT' })).toBeDefined();
+    expect(await store.update(ticket.number, guard, { escalatedFrom: 'UAGENT' })).toBeUndefined();
   });
 
   it('refuses to record an Announcement for an unknown Ticket', async () => {
@@ -72,6 +137,61 @@ describe('DynamoTicketStore', () => {
     expect(input.ExpressionAttributeNames).toEqual({ '#announcement': 'announcement' });
     expect(input.ExpressionAttributeValues).toEqual({
       ':announcement': { M: { channel: { S: 'CGENERAL' }, ts: { S: '100.3' } } },
+    });
+  });
+
+  it('guards an update on Status, the recorded Agent and not being Escalated', async () => {
+    const { client, sent } = fakeDynamo();
+
+    await new DynamoTicketStore('tickets', client).update(
+      ticket.number,
+      { status: ['Open', 'In progress'], agentId: 'UAGENT', unescalated: true },
+      { agentId: 'UOTHER' },
+    );
+
+    const input = sent[0]!.input;
+    expect(input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND #status IN (:from0, :from1) AND #agentId = :agentId AND attribute_not_exists(#escalatedFrom)',
+    );
+    expect(input.ExpressionAttributeNames).toMatchObject({
+      '#status': 'status',
+      '#agentId': 'agentId',
+      '#escalatedFrom': 'escalatedFrom',
+    });
+    expect(input.ExpressionAttributeValues).toMatchObject({
+      ':from0': { S: 'Open' },
+      ':from1': { S: 'In progress' },
+      ':agentId': { S: 'UAGENT' },
+    });
+  });
+
+  it('guards an update on a Ticket having no recorded Agent', async () => {
+    const { client, sent } = fakeDynamo();
+
+    await new DynamoTicketStore('tickets', client).update(
+      ticket.number,
+      { status: ['Open'], agentId: null },
+      { status: 'In progress' },
+    );
+
+    expect(sent[0]!.input.ConditionExpression).toBe(
+      'attribute_exists(pk) AND #status IN (:from0) AND attribute_not_exists(#agentId)',
+    );
+  });
+
+  it('guards an update on Status alone when nothing else is asked', async () => {
+    const { client, sent } = fakeDynamo();
+
+    await new DynamoTicketStore('tickets', client).update(
+      ticket.number,
+      { status: ['Open'] },
+      { status: 'In progress' },
+    );
+
+    expect(sent[0]!.input.ConditionExpression).toBe('attribute_exists(pk) AND #status IN (:from0)');
+    expect(sent[0]!.input.ExpressionAttributeNames).toEqual({
+      '#status': 'status',
+      '#k0': 'status',
     });
   });
 });

@@ -2,7 +2,9 @@ import type { ViewOutput } from '@slack/bolt';
 import { describe, expect, it } from 'vitest';
 import { formatLeadTime, formatTicketNumber } from './ticket.js';
 import {
+  escalateModal,
   messagePermalink,
+  parseEscalateSubmission,
   parseResolveSubmission,
   parseTicketSubmission,
   resolveModal,
@@ -251,6 +253,64 @@ describe('parseResolveSubmission', () => {
       ok: true,
       value: { ticketNumber: 'IT-0003', resolution: 'Fixed' },
     });
+  });
+});
+
+describe('escalateModal', () => {
+  it('asks for the Agent to escalate to from the given Agents, with none picked', () => {
+    const modal = escalateModal('IT-0003', AGENTS);
+    expect(modal).toMatchObject({
+      callback_id: 'escalate_ticket',
+      private_metadata: 'IT-0003',
+      submit: { text: 'Escalate' },
+    });
+    const [block] = modal.blocks;
+    expect(block).toMatchObject({ type: 'input', block_id: 'agent' });
+    expect(block).not.toHaveProperty('optional', true);
+    const select = (block as unknown as { element: Record<string, unknown> }).element;
+    expect(select.options).toEqual([
+      { text: { type: 'plain_text', text: 'Ana' }, value: 'UANA' },
+      { text: { type: 'plain_text', text: 'UBEN' }, value: 'UBEN' },
+    ]);
+    expect(select).not.toHaveProperty('initial_option');
+  });
+
+  it('says there is no one to escalate to, with nothing to submit, when no other Agent is configured', () => {
+    const modal = escalateModal('IT-0003', []);
+    expect(modal).not.toHaveProperty('submit');
+    expect(modal.blocks.some((b) => b.type === 'input')).toBe(false);
+    expect(JSON.stringify(modal.blocks)).toContain('no other Agent');
+  });
+});
+
+describe('parseEscalateSubmission', () => {
+  const escalateSubmission = (agent: string | null) =>
+    ({
+      private_metadata: 'IT-0003',
+      state: {
+        values: {
+          agent: {
+            value: { type: 'static_select', selected_option: agent ? { value: agent } : null },
+          },
+        },
+      },
+    }) as unknown as ViewOutput;
+  const error = { ok: false, errors: { agent: 'Please pick an Agent from the list.' } };
+
+  it('reads the chosen Agent', () => {
+    expect(parseEscalateSubmission(escalateSubmission('UBEN'), AGENT_IDS, 'UANA')).toEqual({
+      ok: true,
+      value: { ticketNumber: 'IT-0003', agentId: 'UBEN' },
+    });
+  });
+
+  it('rejects an Agent who is not configured, or none, against its block', () => {
+    expect(parseEscalateSubmission(escalateSubmission('UEVE'), AGENT_IDS, 'UANA')).toEqual(error);
+    expect(parseEscalateSubmission(escalateSubmission(null), AGENT_IDS, 'UANA')).toEqual(error);
+  });
+
+  it('rejects escalating to the Agent who is escalating', () => {
+    expect(parseEscalateSubmission(escalateSubmission('UANA'), AGENT_IDS, 'UANA')).toEqual(error);
   });
 });
 
