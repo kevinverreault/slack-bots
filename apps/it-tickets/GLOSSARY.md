@@ -21,8 +21,12 @@ The Agent's act of moving an Open Ticket to In progress.
 _Avoid_: Claim, accept, assign
 
 **Resolve**:
-The Agent's act of moving a Ticket to Resolved, optionally with a Resolution note.
+The Agent's act of moving a Ticket to Resolved, picking its Resolution and optionally adding a Resolution note.
 _Avoid_: Close, complete, finish
+
+**Resolution**:
+The Agent's classification of how a Ticket ended: Fixed, Unable to reproduce, As designed or Won't fix. Picked when Resolving; Tickets Resolved before Resolutions existed have none.
+_Avoid_: Outcome, reason, close code
 
 **Resolution note**:
 An optional message from the Agent to the Requester explaining how a Ticket was resolved.
@@ -45,11 +49,11 @@ The private message a Ticket's Agent receives for it. It shows the Ticket's deta
 _Avoid_: Notification, alert
 
 **Announcement**:
-An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is edited once, when the Ticket is Resolved, to show when it was Resolved and its Lead time, but never the Resolution note. It may also get an Announcement follow-up in its thread.
+An optional post of a newly opened Ticket in #general, made when the Requester asks for one. It is edited once, when the Ticket is Resolved, to show its Resolution, when it was Resolved and its Lead time, but never the Resolution note. It may also get an Announcement follow-up in its thread.
 _Avoid_: Broadcast, share
 
 **Announcement follow-up**:
-An optional threaded reply under a Ticket's Announcement, posted when the Agent Resolves it and asks for one. It names the Agent and the Requester, says the Agent resolved the Requester's Ticket, and includes the Resolution note, if any.
+An optional threaded reply under a Ticket's Announcement, posted when the Agent Resolves it and asks for one. It names the Agent and the Requester, says the Agent resolved the Requester's Ticket, and includes the Resolution and the Resolution note, if any.
 _Avoid_: Resolution reply, update
 
 **Lead time**:

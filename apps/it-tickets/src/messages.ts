@@ -77,7 +77,7 @@ export function confirmation(ticket: TicketDetails): Message {
 
 /**
  * The public post in #general for a Ticket whose Requester asked for one. Once the Ticket is
- * Resolved it also says when and how long it was open, but never shows the Resolution note.
+ * Resolved it also shows its Resolution, when, and how long it was open, but never the Resolution note.
  */
 export function announcement(ticket: TicketDetails): Message {
   let text = `📣 <@${ticket.requesterId}> opened IT ticket ${ticket.number}, handled by <@${ticket.agentId}>: ${ticket.title}`;
@@ -90,10 +90,12 @@ export function announcement(ticket: TicketDetails): Message {
   ];
   if (ticket.status === 'Resolved' && ticket.resolvedAt) {
     const leadTime = formatLeadTime(ticket.createdAt, ticket.resolvedAt);
-    text += ` (${STATUS_EMOJI.Resolved} Resolved, open for ${leadTime})`;
+    const resolutionSuffix = ticket.resolution ? ` · ${ticket.resolution}` : '';
+    text += ` (${STATUS_EMOJI.Resolved} Resolved${resolutionSuffix}, open for ${leadTime})`;
+    const resolvedLine = ticket.resolution ? `*Resolved* · ${ticket.resolution} ·` : '*Resolved*';
     blocks.push(
       context(
-        `${STATUS_EMOJI.Resolved} *Resolved* ${slackDate(ticket.resolvedAt)} · open for ${leadTime}`,
+        `${STATUS_EMOJI.Resolved} ${resolvedLine} ${slackDate(ticket.resolvedAt)} · open for ${leadTime}`,
       ),
     );
   }
@@ -106,18 +108,18 @@ export function takenUpdate(ticket: TicketDetails): Message {
 }
 
 export function resolvedUpdate(ticket: TicketDetails): Message {
-  const text = `✅ *${ticket.number}* has been resolved by <@${ticket.agentId}>.`;
-  const blocks = [section(text)];
-  if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
-  return { text, blocks };
+  return resolvedMessage(
+    `✅ *${ticket.number}* has been resolved by <@${ticket.agentId}>.`,
+    ticket,
+  );
 }
 
 /** Posted in a Ticket's Announcement thread when its Agent Resolves it and asks for one. */
 export function announcementFollowUp(ticket: TicketDetails): Message {
-  const text = `✅ <@${ticket.agentId}> resolved <@${ticket.requesterId}>'s IT ticket *${ticket.number}*.`;
-  const blocks = [section(text)];
-  if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
-  return { text, blocks };
+  return resolvedMessage(
+    `✅ <@${ticket.agentId}> resolved <@${ticket.requesterId}>'s IT ticket *${ticket.number}*.`,
+    ticket,
+  );
 }
 
 export function openFailed(): Message {
@@ -126,13 +128,28 @@ export function openFailed(): Message {
   return { text, blocks: [section(text)] };
 }
 
+/** `headline`, then the Ticket's Resolution and Resolution note, each if it has one. */
+function resolvedMessage(headline: string, ticket: TicketDetails): Message {
+  let text = headline;
+  const blocks = [section(headline)];
+  if (ticket.resolution) {
+    text += ` Resolution: ${ticket.resolution}`;
+    blocks.push(section(`*Resolution:* ${ticket.resolution}`));
+  }
+  if (ticket.resolutionNote) blocks.push(section(quote(ticket.resolutionNote)));
+  return { text, blocks };
+}
+
 function detailFields(ticket: TicketDetails, { includeStatus = true } = {}): KnownBlock {
   const fields = [
     `*Category*\n${ticket.category}`,
     `*Urgency*\n${URGENCY_EMOJI[ticket.urgency]} ${ticket.urgency}`,
     `*Opened*\n${slackDate(ticket.createdAt)}`,
   ];
-  if (includeStatus) fields.unshift(`*Status*\n${STATUS_EMOJI[ticket.status]} ${ticket.status}`);
+  if (includeStatus) {
+    if (ticket.resolution) fields.unshift(`*Resolution*\n${ticket.resolution}`);
+    fields.unshift(`*Status*\n${STATUS_EMOJI[ticket.status]} ${ticket.status}`);
+  }
   return { type: 'section', fields: fields.map((text) => ({ type: 'mrkdwn', text })) };
 }
 

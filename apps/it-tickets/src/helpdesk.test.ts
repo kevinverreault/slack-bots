@@ -14,6 +14,7 @@ const draft: TicketDraft = {
   requesterId: REQUESTER,
   agentId: AGENT,
 };
+const FIXED = { resolution: 'Fixed' } as const;
 
 interface Call {
   method: 'postMessage' | 'update';
@@ -271,12 +272,16 @@ describe('helpdesk', () => {
       calls.length = 0;
 
       expect(
-        await helpdesk.resolve(ticket.number, AGENT, { note: 'Restarted the VPN gateway' }),
+        await helpdesk.resolve(ticket.number, AGENT, {
+          ...FIXED,
+          note: 'Restarted the VPN gateway',
+        }),
       ).toBe('done');
 
       const stored = await store.get(ticket.number);
       expect(stored).toMatchObject({
         status: 'Resolved',
+        resolution: 'Fixed',
         resolutionNote: 'Restarted the VPN gateway',
       });
       const [update, reply] = calls;
@@ -288,7 +293,10 @@ describe('helpdesk', () => {
       const ticket = await helpdesk.open(draft);
       await helpdesk.take(ticket.number, AGENT);
 
-      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('done');
+      expect(await helpdesk.resolve(ticket.number, AGENT, { resolution: 'As designed' })).toBe(
+        'done',
+      );
+      expect(await store.get(ticket.number)).toMatchObject({ resolution: 'As designed' });
       expect((await store.get(ticket.number))?.resolutionNote).toBeUndefined();
     });
 
@@ -296,8 +304,8 @@ describe('helpdesk', () => {
       const ticket = await openedFor(OTHER_AGENT);
       calls.length = 0;
 
-      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('not-agent');
-      expect(await helpdesk.resolve(ticket.number, OTHER_AGENT)).toBe('done');
+      expect(await helpdesk.resolve(ticket.number, AGENT, FIXED)).toBe('not-agent');
+      expect(await helpdesk.resolve(ticket.number, OTHER_AGENT, FIXED)).toBe('done');
 
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
       expect(calls[1]!.args.text).toContain(`resolved by <@${OTHER_AGENT}>`);
@@ -313,10 +321,10 @@ describe('helpdesk', () => {
 
     it('never moves a Resolved Ticket', async () => {
       const ticket = await helpdesk.open(draft);
-      await helpdesk.resolve(ticket.number, AGENT);
+      await helpdesk.resolve(ticket.number, AGENT, FIXED);
 
       expect(await helpdesk.take(ticket.number, AGENT)).toBe('stale');
-      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('stale');
+      expect(await helpdesk.resolve(ticket.number, AGENT, FIXED)).toBe('stale');
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
     });
   });
@@ -329,6 +337,7 @@ describe('helpdesk', () => {
 
       expect(
         await helpdesk.resolve(ticket.number, AGENT, {
+          ...FIXED,
           note: 'Restarted the VPN gateway',
           postFollowUp: true,
         }),
@@ -350,7 +359,7 @@ describe('helpdesk', () => {
     it('still updates the Ticket card and the Requester as usual', async () => {
       const ticket = await announced();
 
-      await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true });
+      await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true });
 
       expect(calls.map((c) => [c.method, c.args.channel])).toEqual([
         ['update', ticket.card.channel],
@@ -360,10 +369,23 @@ describe('helpdesk', () => {
       ]);
     });
 
+    it("shows the Resolution on the card, the Requester's Status update, the Announcement and its follow-up", async () => {
+      const ticket = await announced();
+
+      await helpdesk.resolve(ticket.number, AGENT, {
+        resolution: "Won't fix",
+        note: 'Restarted the VPN gateway',
+        postFollowUp: true,
+      });
+
+      expect(calls).toHaveLength(4);
+      for (const call of calls) expect(JSON.stringify(call.args.blocks)).toContain("Won't fix");
+    });
+
     it('posts nothing in #general unless asked', async () => {
       const ticket = await announced();
 
-      await helpdesk.resolve(ticket.number, AGENT, { note: 'Done' });
+      await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, note: 'Done' });
 
       expect(generalPosts()).toEqual([]);
     });
@@ -372,7 +394,9 @@ describe('helpdesk', () => {
       const ticket = await helpdesk.open(draft);
       calls.length = 0;
 
-      expect(await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+      expect(await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true })).toBe(
+        'done',
+      );
 
       expect(calls.map((c) => c.method)).toEqual(['update', 'postMessage']);
     });
@@ -380,8 +404,10 @@ describe('helpdesk', () => {
     it('never posts it twice for a double Resolve', async () => {
       const ticket = await announced();
 
-      await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true });
-      expect(await helpdesk.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('stale');
+      await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true });
+      expect(await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true })).toBe(
+        'stale',
+      );
 
       expect(generalPosts()).toHaveLength(1);
     });
@@ -396,7 +422,9 @@ describe('helpdesk', () => {
       }) as Chat['postMessage'];
       const flaky = withChat(fake.chat);
 
-      expect(await flaky.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+      expect(await flaky.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true })).toBe(
+        'done',
+      );
 
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
       expect(fake.calls.map((c) => [c.method, c.args.channel])).toEqual([
@@ -416,7 +444,7 @@ describe('helpdesk', () => {
       const ticket = await announced();
       clock = new Date('2026-10-14T15:20:00Z');
 
-      await helpdesk.resolve(ticket.number, AGENT, { note: 'Restarted the VPN gateway' });
+      await helpdesk.resolve(ticket.number, AGENT, { ...FIXED, note: 'Restarted the VPN gateway' });
 
       const [edit] = announcementEdits();
       expect(edit!.args.ts).toBe('100.3');
@@ -434,8 +462,8 @@ describe('helpdesk', () => {
     it('never edits it again for a double Resolve', async () => {
       const ticket = await announced();
 
-      await helpdesk.resolve(ticket.number, AGENT);
-      expect(await helpdesk.resolve(ticket.number, AGENT)).toBe('stale');
+      await helpdesk.resolve(ticket.number, AGENT, FIXED);
+      expect(await helpdesk.resolve(ticket.number, AGENT, FIXED)).toBe('stale');
 
       expect(announcementEdits()).toHaveLength(1);
     });
@@ -450,7 +478,9 @@ describe('helpdesk', () => {
       }) as Chat['update'];
       const flaky = withChat(fake.chat);
 
-      expect(await flaky.resolve(ticket.number, AGENT, { postFollowUp: true })).toBe('done');
+      expect(await flaky.resolve(ticket.number, AGENT, { ...FIXED, postFollowUp: true })).toBe(
+        'done',
+      );
 
       expect((await store.get(ticket.number))?.status).toBe('Resolved');
       expect(fake.calls.map((c) => [c.method, c.args.channel])).toEqual([
@@ -480,7 +510,7 @@ describe('helpdesk', () => {
       expect(await helpdesk.take(number, OTHER_AGENT)).toBe('not-agent');
       expect(await helpdesk.take(number, AGENT)).toBe('done');
       expect(calls[1]!.args.text).toContain(`<@${AGENT}> has taken`);
-      expect(await helpdesk.resolve(number, AGENT)).toBe('done');
+      expect(await helpdesk.resolve(number, AGENT, FIXED)).toBe('done');
       expect(calls[3]!.args.text).toContain(`resolved by <@${AGENT}>`);
     });
   });

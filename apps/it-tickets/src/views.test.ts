@@ -164,10 +164,29 @@ describe('resolveModal', () => {
       resolveModal('IT-0003', { announced }).blocks.find((b) => b.block_id === 'note'),
     );
 
+  it('asks for a Resolution first, from exactly the four, with none picked', () => {
+    const [block] = resolveModal('IT-0003').blocks;
+    expect(block).toMatchObject({
+      type: 'input',
+      block_id: 'resolution',
+      label: { text: 'Resolution' },
+    });
+    expect(block).not.toHaveProperty('optional', true);
+    const select = (block as unknown as { element: Record<string, unknown> }).element;
+    expect(select.type).toBe('static_select');
+    expect((select.options as { value: string }[]).map((o) => o.value)).toEqual([
+      'Fixed',
+      'Unable to reproduce',
+      'As designed',
+      "Won't fix",
+    ]);
+    expect(select).not.toHaveProperty('initial_option');
+  });
+
   it('offers to post the resolution in #general, unticked, only for an announced Ticket', () => {
-    expect(blockIds(false)).toEqual(['note']);
-    expect(blockIds(true)).toEqual(['note', 'share']);
-    const share = resolveModal('IT-0003', { announced: true }).blocks[1]!;
+    expect(blockIds(false)).toEqual(['resolution', 'note']);
+    expect(blockIds(true)).toEqual(['resolution', 'note', 'share']);
+    const share = resolveModal('IT-0003', { announced: true }).blocks[2]!;
     expect(share).toMatchObject({ type: 'input', optional: true });
     expect(JSON.stringify(share)).toContain('Also post the resolution in #general');
     expect(share).not.toHaveProperty('element.initial_options');
@@ -180,12 +199,22 @@ describe('resolveModal', () => {
 });
 
 describe('parseResolveSubmission', () => {
-  const resolveSubmission = (share?: string[]) =>
+  const resolveSubmission = ({
+    resolution = 'Fixed',
+    note = 'Restarted it',
+    share,
+  }: { resolution?: string | null; note?: string; share?: string[] } = {}) =>
     ({
       private_metadata: 'IT-0003',
       state: {
         values: {
-          note: { value: { type: 'plain_text_input', value: 'Fixed' } },
+          resolution: {
+            value: {
+              type: 'static_select',
+              selected_option: resolution ? { value: resolution } : null,
+            },
+          },
+          note: { value: { type: 'plain_text_input', value: note } },
           ...(share && {
             share: {
               value: { type: 'checkboxes', selected_options: share.map((value) => ({ value })) },
@@ -195,28 +224,33 @@ describe('parseResolveSubmission', () => {
       },
     }) as unknown as ViewOutput;
 
-  it('asks for an Announcement follow-up only when the box is ticked', () => {
-    expect(parseResolveSubmission(resolveSubmission(['general']))).toEqual({
-      ticketNumber: 'IT-0003',
-      note: 'Fixed',
-      postFollowUp: true,
-    });
-    expect(parseResolveSubmission(resolveSubmission([]))).toEqual({
-      ticketNumber: 'IT-0003',
-      note: 'Fixed',
-    });
-    expect(parseResolveSubmission(resolveSubmission())).toEqual({
-      ticketNumber: 'IT-0003',
-      note: 'Fixed',
+  it('reads the chosen Resolution along with the Resolution note', () => {
+    expect(parseResolveSubmission(resolveSubmission({ resolution: "Won't fix" }))).toEqual({
+      ok: true,
+      value: { ticketNumber: 'IT-0003', resolution: "Won't fix", note: 'Restarted it' },
     });
   });
 
+  it('rejects a submission without a Resolution, or with an unknown one, against its block', () => {
+    const error = { ok: false, errors: { resolution: 'Please pick a resolution.' } };
+    expect(parseResolveSubmission(resolveSubmission({ resolution: null }))).toEqual(error);
+    expect(parseResolveSubmission(resolveSubmission({ resolution: 'Shrugged' }))).toEqual(error);
+  });
+
+  it('asks for an Announcement follow-up only when the box is ticked', () => {
+    const ticked = parseResolveSubmission(resolveSubmission({ share: ['general'] }));
+    expect(ticked.ok && ticked.value.postFollowUp).toBe(true);
+    for (const share of [[], undefined]) {
+      const unticked = parseResolveSubmission(resolveSubmission({ share }));
+      expect(unticked.ok && 'postFollowUp' in unticked.value).toBe(false);
+    }
+  });
+
   it('drops a blank Resolution note', () => {
-    const view = {
-      private_metadata: 'IT-0003',
-      state: { values: { note: { value: { type: 'plain_text_input', value: '  ' } } } },
-    } as unknown as ViewOutput;
-    expect(parseResolveSubmission(view)).toEqual({ ticketNumber: 'IT-0003' });
+    expect(parseResolveSubmission(resolveSubmission({ note: '  ' }))).toEqual({
+      ok: true,
+      value: { ticketNumber: 'IT-0003', resolution: 'Fixed' },
+    });
   });
 });
 
